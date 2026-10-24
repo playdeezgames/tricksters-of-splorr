@@ -179,6 +179,20 @@ append_string :: proc(buf: ^[dynamic]u8, s: string) {
 	append(buf, ..transmute([]u8)s)
 }
 
+// Splits at the space nearest the middle (the second half is empty if there is no space).
+split_in_two :: proc(s: string) -> (string, string) {
+	best := -1
+	for i in 0 ..< len(s) {
+		if s[i] == ' ' && (best < 0 || abs_int(i - len(s) / 2) < abs_int(best - len(s) / 2)) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return s, ""
+	}
+	return s[:best], s[best + 1:]
+}
+
 is_confirm :: proc(e: js.Event) -> bool {
 	return e.key.key == " " || e.key.key == "Enter"
 }
@@ -470,7 +484,10 @@ draw_act :: proc() {
 	text_c_shadow(ACT_ROMAN[l.act], 96, 32, 0xffd060)
 	text_c_shadow(ACT_TITLES[l.act], 148, 12, 0xffffff)
 	text_c_shadow(l.name, 180, 8, 0xf0e6c8)
-	text_c(l.intro, 212, 6, 0xc8c0a8)
+	// Public Pixel is only crisp at multiples of 8, so a long line is split in two rather than shrunk.
+	first, second := split_in_two(l.intro)
+	text_c(first, 208, 8, 0xc8c0a8)
+	text_c(second, 220, 8, 0xc8c0a8)
 	if int(clock * 2) % 2 == 0 {
 		text_c_shadow("PRESS SPACE", 244, 8, 0xffffff)
 	}
@@ -482,7 +499,7 @@ draw_end :: proc() {
 	text_c_shadow("THE END", 56, 24, 0xffd060)
 	text_c_shadow("THE GUARDS WERE THE AUDIENCE ALL ALONG", 92, 8, 0xf0e6c8)
 	row_buf: [64]u8
-	y: f32 = 120
+	y: f32 = 112
 	total, par_total := 0, 0
 	for l, i in levels {
 		if results[i] > 0 {
@@ -490,13 +507,13 @@ draw_end :: proc() {
 		}
 		par_total += l.par
 		line := fmt.bprintf(row_buf[:], "%-22s %s%d / %s%d", l.name, results[i] < 100 ? " " : "", results[i], l.par < 100 ? " " : "", l.par)
-		text(line, (VIEW_W - 6 * 33) / 2, y, 6, results[i] > 0 && results[i] <= l.par ? 0x90ffb0 : 0xf0e6c8)
-		y += 10
+		text(line, (VIEW_W - 8 * 35) / 2, y, 8, results[i] > 0 && results[i] <= l.par ? 0x90ffb0 : 0xf0e6c8)
+		y += 11
 	}
 	line := fmt.bprintf(row_buf[:], "TOTAL %d TURNS (PAR %d)", total, par_total)
 	text_c_shadow(line, y + 8, 8, 0xffd060)
 	if int(clock * 2) % 2 == 0 {
-		text_c_shadow("PRESS SPACE", 262, 8, 0xffffff)
+		text_c_shadow("PRESS SPACE", 268, 8, 0xffffff)
 	}
 }
 
@@ -531,6 +548,29 @@ debug_level :: proc "c" (n: i32) {
 		restart()
 		screen = .Play
 		curtain, curtain_target = 0, 0
+	}
+}
+
+// QA hook: ?screen=title|act|play|end (used for the store screenshots). Call after debug_level.
+@(export)
+debug_screen :: proc "c" (n: i32) {
+	context = ctx
+	switch n {
+	case 0:
+		screen = .Title
+		curtain, curtain_target = 1, 1
+	case 1:
+		screen = .Act
+		curtain, curtain_target = 0, 0
+	case 2:
+		screen = .Play
+		curtain, curtain_target = 0, 0
+	case 3:
+		for l, i in levels {
+			results[i] = l.par
+		}
+		screen = .End
+		curtain, curtain_target = 1, 1
 	}
 }
 

@@ -173,6 +173,20 @@ async function boot() {
   await odin.runWasm("game.wasm", null, { canvas: canvasImports, audio: { play_sound: id => { if (SOUNDS[id]) SOUNDS[id](); } } }, memory);
   const level = parseInt(new URLSearchParams(location.search).get("level"));
   if (level && memory.exports.debug_level) memory.exports.debug_level(level);
+  // QA parameters, used for the store screenshots: ?level=N&screen=title|act|play|end&keys=<moves>
+  // keys uses the solver's notation: U D L R move, . wait, p pickpocket, u d l r toss a coin,
+  // ^ v < > "Look over there!", _ confirm.
+  const params = new URLSearchParams(location.search);
+  const screens = { title: 0, act: 1, play: 2, end: 3 };
+  if (params.has("screen") && memory.exports.debug_screen) memory.exports.debug_screen(screens[params.get("screen")] ?? 2);
+  const moves = {
+    U: ["ArrowUp"], D: ["ArrowDown"], L: ["ArrowLeft"], R: ["ArrowRight"], ".": [" "], _: [" "], p: ["p"],
+    u: ["t", "ArrowUp"], d: ["t", "ArrowDown"], l: ["t", "ArrowLeft"], r: ["t", "ArrowRight"],
+    "^": ["l", "ArrowUp"], v: ["l", "ArrowDown"], "<": ["l", "ArrowLeft"], ">": ["l", "ArrowRight"],
+  };
+  for (const c of params.get("keys") || "") {
+    for (const key of moves[c] || []) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+  }
 }
 boot().catch(e => { console.error(e); document.body.textContent = String(e); });
 </script>
