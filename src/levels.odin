@@ -4,6 +4,9 @@ package tricksters
 levels := [?]Level {
 	{
 		name = "Opening Night",
+		intro = "Watch the guard. Walk when he looks away.",
+		act = 1,
+		par = 30,
 		rows = {
 			"################",
 			"#@.....#.......#",
@@ -22,6 +25,9 @@ levels := [?]Level {
 	},
 	{
 		name = "A Coin Behind the Ear",
+		intro = "T, then a way: a coin pulls guards aside.",
+		act = 1,
+		par = 27,
 		coins = 1,
 		rows = {
 			"################",
@@ -40,6 +46,9 @@ levels := [?]Level {
 	},
 	{
 		name = "Light Fingers",
+		intro = "P lifts a key. Stay beside him, not before.",
+		act = 2,
+		par = 26,
 		keyed = {0 = true},
 		rows = {
 			"################",
@@ -59,6 +68,9 @@ levels := [?]Level {
 	},
 	{
 		name = "Look Over There!",
+		intro = "L, then a way: he turns his back on you.",
+		act = 2,
+		par = 27,
 		points = 1,
 		rows = {
 			"################",
@@ -77,6 +89,9 @@ levels := [?]Level {
 	},
 	{
 		name = "The Right Hat",
+		intro = "A hat fools only guards of its own colour.",
+		act = 3,
+		par = 28,
 		blue = {1 = true},
 		rows = {
 			"################",

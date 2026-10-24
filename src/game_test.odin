@@ -241,6 +241,7 @@ every_level_is_solvable :: proc(t: ^testing.T) {
 	for l in levels {
 		par := solve(l)
 		testing.expectf(t, par > 0, "level %q cannot be solved", l.name)
+		testing.expectf(t, par == l.par, "level %q: par field is %d but the solver says %d", l.name, l.par, par)
 		_, path := solve_with_path(start_of(l))
 		log.infof("level %q par %d, with no guards %d, solution %s", l.name, par, solve_unguarded(l), path)
 	}
@@ -649,4 +650,64 @@ hat_is_undoable :: proc(t: ^testing.T) {
 	testing.expect(t, play(h, &g, .Move_Right))
 	testing.expect(t, undo(h, &g))
 	testing.expect(t, g == start)
+}
+
+// Runs one action the way the page does and describes it.
+event_of :: proc(g: ^Game, a: Action) -> Event {
+	before := g^
+	ok := take_turn(g, a)
+	return describe_turn(&before, g, a, ok)
+}
+
+@(test)
+events_describe_each_kind_of_turn :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@..............#"))
+	testing.expect_value(t, event_of(&g, .Move_Up), Event.Bump)
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.Step)
+	testing.expect_value(t, event_of(&g, .Wait), Event.Wait)
+
+	l := room(EMPTY, "#@h$E>...........#")
+	l.coins = 1
+	game_load(&g, l)
+	testing.expect_value(t, event_of(&g, .Toss_Right), Event.Coin_Toss)
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.Hat)
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.Prize)
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.Won)
+}
+
+@(test)
+events_describe_tricks_and_catches :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@>.D...........#")
+	l.keyed[0] = true
+	l.points = 1
+	g: Game
+	game_load(&g, l)
+	testing.expect_value(t, event_of(&g, .Pickpocket), Event.Pickpocket)
+	g.player = {3, 1}
+	testing.expect_value(t, event_of(&g, .Point_Left), Event.Point)
+	g.guards[0].stun = 0
+	g.guards[0].turned = false
+	g.guards[0].pos = {9, 1}
+	g.player = {3, 1}
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.Door_Open)
+
+	game_load(&g, room(EMPTY, "#@.<............#"))
+	testing.expect_value(t, event_of(&g, .Wait), Event.Caught)
+}
+
+@(test)
+every_event_has_short_lines_and_every_level_has_patter :: proc(t: ^testing.T) {
+	for e in Event {
+		testing.expectf(t, len(NARRATION[e]) > 0, "no lines for %v", e)
+		for line in NARRATION[e] {
+			testing.expectf(t, len(line) <= LINE_MAX, "line too long (%d): %q", len(line), line)
+		}
+	}
+	prev_act := 0
+	for l in levels {
+		testing.expectf(t, len(l.intro) > 0 && len(l.intro) <= LINE_MAX, "bad intro for %q", l.name)
+		testing.expectf(t, l.act >= prev_act && l.act >= 1 && l.act < len(ACT_TITLES), "bad act for %q", l.name)
+		prev_act = l.act
+	}
 }

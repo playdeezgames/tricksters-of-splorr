@@ -115,6 +115,9 @@ History :: struct {
 
 Level :: struct {
 	name:    string,
+	intro:   string, // the trickster's patter when the level starts
+	act:     int,    // index into ACT_TITLES; a change of act shows an act card
+	par:     int,    // the solver's shortest winning run (a test keeps this honest)
 	coins:   int,
 	points:  int, // uses of "Look over there!"
 	rows:    [ROWS]string,
