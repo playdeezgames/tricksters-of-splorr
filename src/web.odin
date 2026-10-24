@@ -93,6 +93,7 @@ on_key :: proc(e: js.Event) {
 	switch e.key.key {
 	case "z", "Z": undo(history, &game)
 	case "r", "R": restart()
+	case "p", "P": play(history, &game, .Pickpocket)
 	case "t", "T": aiming = game.coins > 0 && game.status == .Playing
 	case "Enter":
 		if game.status == .Won {
@@ -118,6 +119,9 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			case .Wall:  sprite(.Civilized, 4, 20, px, py, 0x6a5a8a)
 			case .Prize: sprite(.Jewelry, 0, 0, px, py, 0xffd060)
 			case .Exit:  sprite(.Civilized, 6, 1, px, py, 0x60d080)
+			case .Door:
+				sprite(.Civilized, 4, 20, px, py, 0xc07030)
+				sprite(.Tools, 2, 5, px, py, 0xffd060)
 			}
 		}
 	}
@@ -139,6 +143,9 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			text("?", gx + 6, gy - 8, 8, 0xffd060)
 		}
 		sprite(.People, 3, 2, gx, gy, 0xff6060)
+		if gd.has_key {
+			sprite(.Tools, 0, 6, gx + 6, gy - 9, 0xffd060)
+		}
 	}
 	if aiming {
 		for d in Dir {
@@ -150,16 +157,19 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 	sprite(.People, 0, 2, f32(GRID_X + game.player.x * TILE), f32(GRID_Y + game.player.y * TILE), 0xffffff)
 
 	text(levels[level_index].name, 10, 270, 6, 0x7a6a9a)
+	buf: [16]u8
 	if game.coins > 0 || aiming {
-		buf: [16]u8
 		text(fmt.bprintf(buf[:], "COINS %d", game.coins), 330, 4, 8, 0xffd060)
+	}
+	if game.keys > 0 {
+		text(fmt.bprintf(buf[:], "KEYS %d", game.keys), 330, 14, 8, 0xffd060)
 	}
 	switch game.status {
 	case .Playing:
 		if aiming {
 			text("TOSS WHICH WAY? (ANY OTHER KEY CANCELS)", 10, 282, 6, 0xffd060)
 		} else {
-			text("ARROWS MOVE  SPACE WAIT  T TOSS COIN  Z UNDO  R RESTART", 10, 282, 6, 0xa090c0)
+			text("ARROWS MOVE  SPACE WAIT  T COIN  P PICKPOCKET  Z UNDO  R RESTART", 10, 282, 6, 0xa090c0)
 		}
 	case .Caught:  text("SPOTTED!  Z TO UNDO, R TO RESTART", 10, 282, 8, 0xff6060)
 	case .Won:     text("CURTAIN CALL!  SPACE FOR THE NEXT ACT", 10, 282, 8, 0x60d080)

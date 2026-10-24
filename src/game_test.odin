@@ -2,6 +2,7 @@
 package tricksters
 
 import "core:log"
+import "core:slice"
 import "core:testing"
 
 // Run with: odin test src -define:ODIN_TEST_THREADS=1
@@ -169,6 +170,12 @@ solve :: proc(level: Level) -> int {
 	return solve_from(start)
 }
 
+start_of :: proc(level: Level) -> Game {
+	g: Game
+	game_load(&g, level)
+	return g
+}
+
 solve_unguarded :: proc(level: Level) -> int {
 	start: Game
 	game_load(&start, level)
@@ -177,40 +184,55 @@ solve_unguarded :: proc(level: Level) -> int {
 }
 
 solve_from :: proc(start: Game) -> int {
-	start := start
+	turns, _ := solve_with_path(start)
+	return turns
+}
+
+// Breadth-first search; also returns the winning actions as text (U D L R . for moves and wait,
+// u d l r for coin tosses, p for a pickpocket) so a human can replay the level.
+solve_with_path :: proc(start: Game) -> (turns: int, path: string) {
+	Node :: struct {
+		game:   Game,
+		parent: int,
+		action: Action,
+	}
+	nodes := make([dynamic]Node)
+	defer delete(nodes)
 	visited := make(map[State_Key]struct{})
 	defer delete(visited)
-	cur := make([dynamic]Game)
-	next := make([dynamic]Game)
-	defer delete(cur)
-	defer delete(next)
-	append(&cur, start)
-	visited[state_key(&start)] = {}
-	for len(cur) > 0 {
-		clear(&next)
-		for s in cur {
-			for a in Action {
-				n := s
-				if !take_turn(&n, a) {
-					continue
-				}
-				if n.status == .Won {
-					return n.turn
-				}
-				if n.status != .Playing {
-					continue
-				}
-				k := state_key(&n)
-				if k in visited {
-					continue
-				}
-				visited[k] = {}
-				append(&next, n)
-			}
-		}
-		cur, next = next, cur
+	append(&nodes, Node{game = start, parent = -1})
+	visited[state_key(&nodes[0].game)] = {}
+	glyph := [Action]u8{
+		.Move_Up = 'U', .Move_Down = 'D', .Move_Left = 'L', .Move_Right = 'R', .Wait = '.',
+		.Toss_Up = 'u', .Toss_Down = 'd', .Toss_Left = 'l', .Toss_Right = 'r', .Pickpocket = 'p',
 	}
-	return -1
+	for head := 0; head < len(nodes); head += 1 {
+		for a in Action {
+			n := nodes[head].game
+			if !take_turn(&n, a) {
+				continue
+			}
+			if n.status == .Won {
+				buf := make([dynamic]u8, context.temp_allocator)
+				append(&buf, glyph[a])
+				for i := head; nodes[i].parent >= 0; i = nodes[i].parent {
+					append(&buf, glyph[nodes[i].action])
+				}
+				slice.reverse(buf[:])
+				return n.turn, string(buf[:])
+			}
+			if n.status != .Playing {
+				continue
+			}
+			k := state_key(&n)
+			if k in visited {
+				continue
+			}
+			visited[k] = {}
+			append(&nodes, Node{game = n, parent = head, action = a})
+		}
+	}
+	return -1, ""
 }
 
 @(test)
@@ -218,7 +240,8 @@ every_level_is_solvable :: proc(t: ^testing.T) {
 	for l in levels {
 		par := solve(l)
 		testing.expectf(t, par > 0, "level %q cannot be solved", l.name)
-		log.infof("level %q par %d, with no guards %d", l.name, par, solve_unguarded(l))
+		_, path := solve_with_path(start_of(l))
+		log.infof("level %q par %d, with no guards %d, solution %s", l.name, par, solve_unguarded(l), path)
 	}
 }
 
@@ -347,6 +370,96 @@ toss_is_undoable :: proc(t: ^testing.T) {
 	game_load(&g, l)
 	start := g
 	testing.expect(t, play(h, &g, .Toss_Right))
+	testing.expect(t, undo(h, &g))
+	testing.expect(t, g == start)
+}
+
+@(test)
+door_needs_a_key_and_the_key_is_spent :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@D.............#"))
+	before := g
+	testing.expect(t, !take_turn(&g, .Move_Right))
+	testing.expect(t, g == before)
+	g.keys = 1
+	testing.expect(t, take_turn(&g, .Move_Right))
+	testing.expect_value(t, g.player, [2]int{2, 1})
+	testing.expect_value(t, g.keys, 0)
+	testing.expect_value(t, g.tiles[1][2], Tile.Floor)
+}
+
+@(test)
+doors_block_sight_coins_and_guards :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#>.D............#", EMPTY))
+	cone: [SIGHT_RANGE][2]int
+	testing.expect_value(t, cone_cells(&g, g.guards[0], &cone), 1) // only (2,1); the door stops the rest
+	g.player = {4, 1}
+	_, ok := coin_landing(&g, .Left) // the first tile that way is the door's
+	testing.expect(t, !ok) // (4,1)->(3,1) is the door: nothing to land on
+	_, reachable := path_step(&g, g.guards[0].pos, [2]int{5, 1})
+	testing.expect(t, !reachable) // the corridor is sealed
+}
+
+@(test)
+pickpocket_from_behind_takes_the_key :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@>.............#")
+	l.keyed[0] = true
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, take_turn(&g, .Pickpocket))
+	testing.expect_value(t, g.keys, 1)
+	testing.expect(t, !g.guards[0].has_key)
+	testing.expect_value(t, g.turn, 1)
+	testing.expect_value(t, g.status, Status.Playing)
+	testing.expect(t, !take_turn(&g, .Pickpocket)) // nothing left to take
+}
+
+@(test)
+pickpocket_fails_in_front_of_the_guard :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@<.............#")
+	l.keyed[0] = true
+	g: Game
+	game_load(&g, l)
+	// The guard faces left, straight at the adjacent player.
+	before := g
+	testing.expect(t, !take_turn(&g, .Pickpocket))
+	testing.expect(t, g == before)
+}
+
+@(test)
+pickpocket_from_the_side_works_and_needs_adjacency_and_a_key :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@..>............#", "#...............#")
+	l.keyed[0] = true
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, !take_turn(&g, .Pickpocket)) // not adjacent
+	g.player = {4, 2} // directly below a guard facing right
+	testing.expect(t, take_turn(&g, .Pickpocket))
+	l.keyed[0] = false
+	game_load(&g, l)
+	g.player = {4, 2}
+	testing.expect(t, !take_turn(&g, .Pickpocket)) // no key to take
+}
+
+@(test)
+key_level_needs_the_pickpocket :: proc(t: ^testing.T) {
+	l := levels[2]
+	testing.expect(t, solve(l) > 0)
+	l.keyed = {}
+	testing.expect_value(t, solve(l), -1)
+}
+
+@(test)
+pickpocket_is_undoable :: proc(t: ^testing.T) {
+	h := new(History)
+	defer free(h)
+	l := room(EMPTY, "#@>.............#")
+	l.keyed[0] = true
+	g: Game
+	game_load(&g, l)
+	start := g
+	testing.expect(t, play(h, &g, .Pickpocket))
 	testing.expect(t, undo(h, &g))
 	testing.expect(t, g == start)
 }

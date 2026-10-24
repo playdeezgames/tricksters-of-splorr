@@ -20,6 +20,7 @@ Tile :: enum u8 {
 	Wall,
 	Prize,
 	Exit,
+	Door, // locked: blocks movement and sight until the player walks into it holding a key
 }
 
 Dir :: enum {
@@ -40,6 +41,7 @@ Action :: enum {
 	Toss_Down,
 	Toss_Left,
 	Toss_Right,
+	Pickpocket, // lift the key from an adjacent guard who cannot see you
 }
 
 // Patrol follows the patrol string. A coin sends the guard to Investigate its landing tile,
@@ -68,6 +70,7 @@ Guard :: struct {
 	timer:      int,
 	home:       [2]int,
 	home_facing: Dir,
+	has_key:    bool,
 }
 
 // Plain data only (no pointers, slices or maps), so a copy is a snapshot.
@@ -78,6 +81,7 @@ Game :: struct {
 	guard_count: int,
 	has_prize:   bool,
 	coins:       int,
+	keys:        int,
 	status:      Status,
 	turn:        int,
 }
@@ -92,6 +96,12 @@ Level :: struct {
 	coins:   int,
 	rows:    [ROWS]string,
 	patrols: [MAX_GUARDS]string, // one per guard, in reading order of the map
+	keyed:   [MAX_GUARDS]bool,   // which guards carry a key
+}
+
+// Walls and locked doors stop guards, sight and coins.
+blocks :: proc(t: Tile) -> bool {
+	return t == .Wall || t == .Door
 }
 
 dir_delta :: proc(d: Dir) -> [2]int {
@@ -108,7 +118,7 @@ in_bounds :: proc(p: [2]int) -> bool {
 	return p.x >= 0 && p.x < COLS && p.y >= 0 && p.y < ROWS
 }
 
-// Map glyphs: '#' wall, '$' prize, 'E' exit, '@' player start, '^' 'v' '<' '>' a guard facing that way.
+// Map glyphs: '#' wall, 'D' locked door, '$' prize, 'E' exit, '@' player start, '^' 'v' '<' '>' a guard facing that way.
 game_load :: proc(g: ^Game, level: Level) {
 	g^ = {}
 	g.coins = level.coins
@@ -119,6 +129,7 @@ game_load :: proc(g: ^Game, level: Level) {
 			case '#': g.tiles[y][x] = .Wall
 			case '$': g.tiles[y][x] = .Prize
 			case 'E': g.tiles[y][x] = .Exit
+			case 'D': g.tiles[y][x] = .Door
 			case '@': g.player = {x, y}
 			case '^', 'v', '<', '>':
 				if g.guard_count < MAX_GUARDS {
@@ -135,6 +146,7 @@ game_load :: proc(g: ^Game, level: Level) {
 						gd.patrol[i] = patrol[i]
 					}
 					gd.patrol_len = min(len(patrol), MAX_PATROL)
+					gd.has_key = level.keyed[g.guard_count]
 					g.guard_count += 1
 				}
 			}
@@ -158,7 +170,7 @@ cone_cells :: proc(g: ^Game, gd: Guard, out: ^[SIGHT_RANGE][2]int) -> int {
 	p := gd.pos
 	for _ in 0 ..< SIGHT_RANGE {
 		p += d
-		if !in_bounds(p) || g.tiles[p.y][p.x] == .Wall {
+		if !in_bounds(p) || blocks(g.tiles[p.y][p.x]) {
 			break
 		}
 		out[n] = p
@@ -203,7 +215,7 @@ path_step :: proc(g: ^Game, from, to: [2]int) -> (d: Dir, ok: bool) {
 		head += 1
 		for dd in Dir {
 			q := p + dir_delta(dd)
-			if !in_bounds(q) || g.tiles[q.y][q.x] == .Wall || dist[q.y][q.x] >= 0 {
+			if !in_bounds(q) || blocks(g.tiles[q.y][q.x]) || dist[q.y][q.x] >= 0 {
 				continue
 			}
 			dist[q.y][q.x] = dist[p.y][p.x] + 1
@@ -217,7 +229,7 @@ path_step :: proc(g: ^Game, from, to: [2]int) -> (d: Dir, ok: bool) {
 	}
 	for dd in Dir {
 		q := from + dir_delta(dd)
-		if in_bounds(q) && g.tiles[q.y][q.x] != .Wall && dist[q.y][q.x] == here - 1 && !guard_at(g, q) {
+		if in_bounds(q) && !blocks(g.tiles[q.y][q.x]) && dist[q.y][q.x] == here - 1 && !guard_at(g, q) {
 			return dd, true
 		}
 	}
@@ -247,7 +259,7 @@ patrol_step :: proc(g: ^Game, gd: ^Guard) {
 	}
 	gd.facing = d
 	to := gd.pos + dir_delta(d)
-	if in_bounds(to) && g.tiles[to.y][to.x] != .Wall && !guard_at(g, to) {
+	if in_bounds(to) && !blocks(g.tiles[to.y][to.x]) && !guard_at(g, to) {
 		gd.pos = to
 	}
 }
@@ -288,13 +300,36 @@ step_guards :: proc(g: ^Game) {
 coin_landing :: proc(g: ^Game, d: Dir) -> (land: [2]int, ok: bool) {
 	for i in 1 ..= COIN_RANGE {
 		q := g.player + dir_delta(d) * i
-		if !in_bounds(q) || g.tiles[q.y][q.x] == .Wall {
+		if !in_bounds(q) || blocks(g.tiles[q.y][q.x]) {
 			break
 		}
 		land = q
 		ok = true
 	}
 	return
+}
+
+// Takes the key from the first adjacent guard that has one and is not looking at the player.
+pick_pocket :: proc(g: ^Game) -> bool {
+	cone: [SIGHT_RANGE][2]int
+	for i in 0 ..< g.guard_count {
+		gd := &g.guards[i]
+		if !gd.has_key || abs_int(gd.pos.x - g.player.x) + abs_int(gd.pos.y - g.player.y) != 1 {
+			continue
+		}
+		n := cone_cells(g, gd^, &cone)
+		watched := false
+		for c in cone[:n] {
+			watched ||= c == g.player
+		}
+		if watched {
+			continue
+		}
+		gd.has_key = false
+		g.keys += 1
+		return true
+	}
+	return false
 }
 
 abs_int :: proc(n: int) -> int {
@@ -329,10 +364,21 @@ take_turn :: proc(g: ^Game, a: Action) -> bool {
 		if !in_bounds(to) || g.tiles[to.y][to.x] == .Wall {
 			return false
 		}
+		if g.tiles[to.y][to.x] == .Door {
+			if g.keys <= 0 {
+				return false
+			}
+			g.keys -= 1
+			g.tiles[to.y][to.x] = .Floor
+		}
 		g.player = to
 		if g.tiles[to.y][to.x] == .Prize {
 			g.has_prize = true
 			g.tiles[to.y][to.x] = .Floor
+		}
+	case .Pickpocket:
+		if !pick_pocket(g) {
+			return false
 		}
 	case .Toss_Up, .Toss_Down, .Toss_Left, .Toss_Right:
 		if g.coins <= 0 {
@@ -380,8 +426,9 @@ undo :: proc(h: ^History, g: ^Game) -> bool {
 }
 
 // Everything that distinguishes two states for the solver (the turn counter is left out).
-GUARD_KEY_BYTES :: 11
-State_Key :: [5 + MAX_GUARDS * GUARD_KEY_BYTES]u8
+GUARD_KEY_BYTES :: 12
+DOOR_KEY_BYTES  :: (ROWS * COLS + 7) / 8
+State_Key :: [6 + MAX_GUARDS * GUARD_KEY_BYTES + DOOR_KEY_BYTES]u8
 
 state_key :: proc(g: ^Game) -> (k: State_Key) {
 	k[0] = u8(g.player.x)
@@ -389,9 +436,10 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 	k[2] = u8(g.has_prize)
 	k[3] = u8(g.status)
 	k[4] = u8(g.coins)
+	k[5] = u8(g.keys)
 	for i in 0 ..< g.guard_count {
 		gd := g.guards[i]
-		o := 5 + i * GUARD_KEY_BYTES
+		o := 6 + i * GUARD_KEY_BYTES
 		k[o + 0] = u8(gd.pos.x)
 		k[o + 1] = u8(gd.pos.y)
 		k[o + 2] = u8(gd.facing)
@@ -403,6 +451,16 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 		k[o + 8] = u8(gd.home.x)
 		k[o + 9] = u8(gd.home.y)
 		k[o + 10] = u8(gd.home_facing)
+		k[o + 11] = u8(gd.has_key)
+	}
+	// Which doors are still locked.
+	for y in 0 ..< ROWS {
+		for x in 0 ..< COLS {
+			if g.tiles[y][x] == .Door {
+				bit := y * COLS + x
+				k[6 + MAX_GUARDS * GUARD_KEY_BYTES + bit / 8] |= 1 << uint(bit % 8)
+			}
+		}
 	}
 	return
 }
