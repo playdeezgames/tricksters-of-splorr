@@ -94,6 +94,8 @@ async function boot() {
   for (const s of SHEETS) images.push(await loadImage(s));
   canvas.focus();
   await odin.runWasm("game.wasm", null, { canvas: canvasImports }, memory);
+  const level = parseInt(new URLSearchParams(location.search).get("level"));
+  if (level && memory.exports.debug_level) memory.exports.debug_level(level);
 }
 boot().catch(e => { console.error(e); document.body.textContent = String(e); });
 </script>

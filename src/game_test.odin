@@ -166,6 +166,18 @@ undo_after_caught_resumes_play :: proc(t: ^testing.T) {
 solve :: proc(level: Level) -> int {
 	start: Game
 	game_load(&start, level)
+	return solve_from(start)
+}
+
+solve_unguarded :: proc(level: Level) -> int {
+	start: Game
+	game_load(&start, level)
+	start.guard_count = 0
+	return solve_from(start)
+}
+
+solve_from :: proc(start: Game) -> int {
+	start := start
 	visited := make(map[State_Key]struct{})
 	defer delete(visited)
 	cur := make([dynamic]Game)
@@ -206,12 +218,135 @@ every_level_is_solvable :: proc(t: ^testing.T) {
 	for l in levels {
 		par := solve(l)
 		testing.expectf(t, par > 0, "level %q cannot be solved", l.name)
-		log.infof("level %q par %d", l.name, par)
+		log.infof("level %q par %d, with no guards %d", l.name, par, solve_unguarded(l))
 	}
+}
+
+// The first level must make the guard matter: the par beats the walk with no guards.
+@(test)
+first_level_forces_timing :: proc(t: ^testing.T) {
+	par := solve(levels[0])
+	open := solve_unguarded(levels[0])
+	testing.expectf(t, par > open, "par %d is not longer than the unguarded walk %d", par, open)
+}
+
+@(test)
+coin_level_needs_the_coin :: proc(t: ^testing.T) {
+	l := levels[1]
+	testing.expect(t, solve(l) > 0)
+	l.coins = 0
+	testing.expect_value(t, solve(l), -1)
 }
 
 @(test)
 solver_reports_unsolvable :: proc(t: ^testing.T) {
 	l := room(EMPTY, "#@#$E..........#", EMPTY) // walls seal the player in
 	testing.expect_value(t, solve(l), -1)
+}
+
+@(test)
+toss_with_no_coins_does_nothing :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@.............#"))
+	before := g
+	testing.expect(t, !take_turn(&g, .Toss_Right))
+	testing.expect(t, g == before)
+}
+
+@(test)
+toss_into_adjacent_wall_does_nothing :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@.............#")
+	l.coins = 1
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, !take_turn(&g, .Toss_Left))
+	testing.expect_value(t, g.coins, 1)
+}
+
+@(test)
+coin_flies_four_tiles_or_to_the_wall :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@....#........#")
+	l.coins = 2
+	g: Game
+	game_load(&g, l)
+	land, ok := coin_landing(&g, .Right)
+	testing.expect(t, ok)
+	testing.expect_value(t, land, [2]int{5, 1}) // range 4 runs to x=5, one short of the wall at 6
+	g.player = {3, 1}
+	land, ok = coin_landing(&g, .Right)
+	testing.expect_value(t, land, [2]int{5, 1}) // stopped by the wall
+	testing.expect(t, take_turn(&g, .Toss_Right))
+	testing.expect_value(t, g.coins, 1)
+}
+
+@(test)
+coin_pulls_a_guard_away_and_it_comes_home :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@.......<......#")
+	l.coins = 1
+	g: Game
+	game_load(&g, l)
+	home := g.guards[0].pos
+	testing.expect(t, take_turn(&g, .Toss_Right)) // lands at (5,1); the guard hears it
+	gd := &g.guards[0]
+	testing.expect_value(t, gd.mode, Guard_Mode.Investigate)
+	testing.expect_value(t, gd.pos, [2]int{8, 1})
+	for expected in ([?]int{7, 6, 5}) {
+		take_turn(&g, .Wait)
+		testing.expect_value(t, gd.pos.x, expected)
+	}
+	testing.expect_value(t, gd.mode, Guard_Mode.Stare)
+	take_turn(&g, .Wait) // still staring
+	testing.expect_value(t, gd.pos.x, 5)
+	take_turn(&g, .Wait) // stare over, first step home
+	testing.expect_value(t, gd.mode, Guard_Mode.Return)
+	testing.expect_value(t, gd.pos.x, 6)
+	take_turn(&g, .Wait)
+	take_turn(&g, .Wait)
+	take_turn(&g, .Wait)
+	testing.expect_value(t, gd.pos, home)
+	testing.expect_value(t, gd.mode, Guard_Mode.Patrol)
+	testing.expect_value(t, gd.facing, Dir.Left)
+	testing.expect_value(t, g.status, Status.Playing)
+}
+
+@(test)
+guard_out_of_earshot_ignores_the_coin :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@............<#")
+	l.coins = 1
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, take_turn(&g, .Toss_Right)) // lands at (5,1), nine tiles from the guard
+	testing.expect_value(t, g.guards[0].mode, Guard_Mode.Patrol)
+	testing.expect_value(t, g.guards[0].pos.x, 14)
+}
+
+@(test)
+distracted_guard_resumes_patrol_where_it_left :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@.......>.......#")
+	l.coins = 1
+	l.patrols[0] = "RRLL"
+	g: Game
+	game_load(&g, l)
+	take_turn(&g, .Wait) // patrol step 1 -> (9,1)
+	testing.expect_value(t, g.guards[0].patrol_idx, 1)
+	take_turn(&g, .Toss_Right)
+	testing.expect_value(t, g.guards[0].patrol_idx, 1) // patrol is paused, not advanced
+	for _ in 0 ..< 20 {
+		take_turn(&g, .Wait)
+	}
+	testing.expect_value(t, g.guards[0].mode, Guard_Mode.Patrol)
+}
+
+@(test)
+toss_is_undoable :: proc(t: ^testing.T) {
+	h := new(History)
+	defer free(h)
+	l := room(EMPTY, "#@.......<......#")
+	l.coins = 1
+	g: Game
+	game_load(&g, l)
+	start := g
+	testing.expect(t, play(h, &g, .Toss_Right))
+	testing.expect(t, undo(h, &g))
+	testing.expect(t, g == start)
 }

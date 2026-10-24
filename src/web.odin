@@ -2,6 +2,7 @@
 package tricksters
 
 import "base:runtime"
+import "core:fmt"
 import "core:sys/wasm/js"
 
 // Logical canvas size; the page scales it by a whole number.
@@ -38,8 +39,10 @@ ctx: runtime.Context
 game: Game
 history: ^History
 level_index: int
+aiming: bool // T was pressed: the next direction key tosses a coin
 
 restart :: proc() {
+	aiming = false
 	game_load(&game, levels[level_index])
 	history.count = 0
 }
@@ -62,7 +65,13 @@ on_key :: proc(e: js.Event) {
 	case "ArrowDown":  act = .Move_Down
 	case "ArrowLeft":  act = .Move_Left
 	case "ArrowRight": act = .Move_Right
-	case " ":          act = .Wait
+	case " ":
+		if game.status == .Won {
+			level_index = (level_index + 1) % len(levels)
+			restart()
+			return
+		}
+		act = .Wait
 	case:
 		switch e.key.code {
 		case "KeyW": act = .Move_Up
@@ -72,13 +81,24 @@ on_key :: proc(e: js.Event) {
 		}
 	}
 	if a, ok := act.?; ok {
+		if aiming && int(a) <= int(Action.Move_Right) {
+			a = Action(int(a) + int(Action.Toss_Up))
+		}
+		aiming = false
 		play(history, &game, a)
 		js.event_prevent_default()
 		return
 	}
+	aiming = false
 	switch e.key.key {
 	case "z", "Z": undo(history, &game)
 	case "r", "R": restart()
+	case "t", "T": aiming = game.coins > 0 && game.status == .Playing
+	case "Enter":
+		if game.status == .Won {
+			level_index = (level_index + 1) % len(levels)
+			restart()
+		}
 	}
 }
 
@@ -112,16 +132,49 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 	}
 	for i in 0 ..< game.guard_count {
 		gd := game.guards[i]
-		sprite(.People, 3, 2, f32(GRID_X + gd.pos.x * TILE), f32(GRID_Y + gd.pos.y * TILE), 0xff6060)
+		gx := f32(GRID_X + gd.pos.x * TILE)
+		gy := f32(GRID_Y + gd.pos.y * TILE)
+		if gd.mode == .Investigate || gd.mode == .Stare {
+			sprite(.UI, 0, 0, f32(GRID_X + gd.target.x * TILE), f32(GRID_Y + gd.target.y * TILE), 0xffd060)
+			text("?", gx + 6, gy - 8, 8, 0xffd060)
+		}
+		sprite(.People, 3, 2, gx, gy, 0xff6060)
+	}
+	if aiming {
+		for d in Dir {
+			if land, ok := coin_landing(&game, d); ok {
+				fill_rect(f32(GRID_X + land.x * TILE), f32(GRID_Y + land.y * TILE), TILE, TILE, 1, 0.82, 0.38, 0.5)
+			}
+		}
 	}
 	sprite(.People, 0, 2, f32(GRID_X + game.player.x * TILE), f32(GRID_Y + game.player.y * TILE), 0xffffff)
 
+	text(levels[level_index].name, 10, 270, 6, 0x7a6a9a)
+	if game.coins > 0 || aiming {
+		buf: [16]u8
+		text(fmt.bprintf(buf[:], "COINS %d", game.coins), 330, 4, 8, 0xffd060)
+	}
 	switch game.status {
-	case .Playing: text("ARROWS/WASD MOVE  SPACE WAIT  Z UNDO  R RESTART", 10, 270, 6, 0xa090c0)
-	case .Caught:  text("SPOTTED!  Z TO UNDO, R TO RESTART", 10, 270, 8, 0xff6060)
-	case .Won:     text("CURTAIN CALL!  R TO PLAY AGAIN", 10, 270, 8, 0x60d080)
+	case .Playing:
+		if aiming {
+			text("TOSS WHICH WAY? (ANY OTHER KEY CANCELS)", 10, 282, 6, 0xffd060)
+		} else {
+			text("ARROWS MOVE  SPACE WAIT  T TOSS COIN  Z UNDO  R RESTART", 10, 282, 6, 0xa090c0)
+		}
+	case .Caught:  text("SPOTTED!  Z TO UNDO, R TO RESTART", 10, 282, 8, 0xff6060)
+	case .Won:     text("CURTAIN CALL!  SPACE FOR THE NEXT ACT", 10, 282, 8, 0x60d080)
 	}
 	return true
+}
+
+// QA hook: the page calls this for ?level=N (1-based).
+@(export)
+debug_level :: proc "c" (n: i32) {
+	context = ctx
+	if n >= 1 && int(n) <= len(levels) {
+		level_index = int(n) - 1
+		restart()
+	}
 }
 
 main :: proc() {
