@@ -14,6 +14,8 @@ MAX_HISTORY :: 512
 COIN_RANGE  :: 4 // a tossed coin flies this far in a straight line, or until a wall
 HEARING     :: 5 // guards this close (in tiles, Manhattan) to where the coin lands go and look
 STARE_TURNS :: 2 // turns a guard stays at the coin before walking home
+LOOK_RANGE  :: 3 // "Look over there!" reaches the first guard this close in a straight line
+LOOK_TURNS  :: 3 // the guard faces the way you pointed for this many turns, the pointing turn included
 
 Tile :: enum u8 {
 	Floor,
@@ -42,6 +44,10 @@ Action :: enum {
 	Toss_Left,
 	Toss_Right,
 	Pickpocket, // lift the key from an adjacent guard who cannot see you
+	Point_Up, // "Look over there!": the nearest guard in line that way turns to face that way
+	Point_Down,
+	Point_Left,
+	Point_Right,
 }
 
 // Patrol follows the patrol string. A coin sends the guard to Investigate its landing tile,
@@ -71,6 +77,9 @@ Guard :: struct {
 	home:       [2]int,
 	home_facing: Dir,
 	has_key:    bool,
+	stun:       int,  // turns left of being made to look away
+	turned:     bool, // facing is overridden; pre_look is restored when the stun ends
+	pre_look:   Dir,
 }
 
 // Plain data only (no pointers, slices or maps), so a copy is a snapshot.
@@ -82,6 +91,7 @@ Game :: struct {
 	has_prize:   bool,
 	coins:       int,
 	keys:        int,
+	points:      int,
 	status:      Status,
 	turn:        int,
 }
@@ -94,6 +104,7 @@ History :: struct {
 Level :: struct {
 	name:    string,
 	coins:   int,
+	points:  int, // uses of "Look over there!"
 	rows:    [ROWS]string,
 	patrols: [MAX_GUARDS]string, // one per guard, in reading order of the map
 	keyed:   [MAX_GUARDS]bool,   // which guards carry a key
@@ -122,6 +133,7 @@ in_bounds :: proc(p: [2]int) -> bool {
 game_load :: proc(g: ^Game, level: Level) {
 	g^ = {}
 	g.coins = level.coins
+	g.points = level.points
 	for row, y in level.rows {
 		for x in 0 ..< COLS {
 			c := x < len(row) ? row[x] : ' '
@@ -275,6 +287,14 @@ return_step :: proc(g: ^Game, gd: ^Guard) {
 step_guards :: proc(g: ^Game) {
 	for i in 0 ..< g.guard_count {
 		gd := &g.guards[i]
+		if gd.stun > 0 {
+			gd.stun -= 1
+			continue
+		}
+		if gd.turned {
+			gd.facing = gd.pre_look
+			gd.turned = false
+		}
 		switch gd.mode {
 		case .Patrol:
 			patrol_step(g, gd)
@@ -332,6 +352,22 @@ pick_pocket :: proc(g: ^Game) -> bool {
 	return false
 }
 
+// The first guard in a straight line from the player in direction d, within LOOK_RANGE.
+look_target :: proc(g: ^Game, d: Dir) -> (index: int, ok: bool) {
+	for i in 1 ..= LOOK_RANGE {
+		q := g.player + dir_delta(d) * i
+		if !in_bounds(q) || blocks(g.tiles[q.y][q.x]) {
+			return
+		}
+		for gi in 0 ..< g.guard_count {
+			if g.guards[gi].pos == q {
+				return gi, true
+			}
+		}
+	}
+	return
+}
+
 abs_int :: proc(n: int) -> int {
 	return n < 0 ? -n : n
 }
@@ -380,6 +416,20 @@ take_turn :: proc(g: ^Game, a: Action) -> bool {
 		if !pick_pocket(g) {
 			return false
 		}
+	case .Point_Up, .Point_Down, .Point_Left, .Point_Right:
+		d := Dir(int(a) - int(Action.Point_Up))
+		gi, ok := look_target(g, d)
+		if g.points <= 0 || !ok {
+			return false
+		}
+		g.points -= 1
+		gd := &g.guards[gi]
+		if !gd.turned {
+			gd.pre_look = gd.facing
+			gd.turned = true
+		}
+		gd.facing = d
+		gd.stun = LOOK_TURNS
 	case .Toss_Up, .Toss_Down, .Toss_Left, .Toss_Right:
 		if g.coins <= 0 {
 			return false
@@ -426,39 +476,52 @@ undo :: proc(h: ^History, g: ^Game) -> bool {
 }
 
 // Everything that distinguishes two states for the solver (the turn counter is left out).
-GUARD_KEY_BYTES :: 12
+GUARD_KEY_BYTES :: 15
+HEADER_KEY_BYTES :: 7
 DOOR_KEY_BYTES  :: (ROWS * COLS + 7) / 8
-State_Key :: [6 + MAX_GUARDS * GUARD_KEY_BYTES + DOOR_KEY_BYTES]u8
+State_Key :: [HEADER_KEY_BYTES + MAX_GUARDS * GUARD_KEY_BYTES + DOOR_KEY_BYTES]u8
 
 state_key :: proc(g: ^Game) -> (k: State_Key) {
-	k[0] = u8(g.player.x)
-	k[1] = u8(g.player.y)
-	k[2] = u8(g.has_prize)
-	k[3] = u8(g.status)
-	k[4] = u8(g.coins)
-	k[5] = u8(g.keys)
-	for i in 0 ..< g.guard_count {
+	n := 0
+	put :: proc(k: ^State_Key, n: ^int, v: int) {
+		k[n^] = u8(v)
+		n^ += 1
+	}
+	put(&k, &n, g.player.x)
+	put(&k, &n, g.player.y)
+	put(&k, &n, int(g.has_prize))
+	put(&k, &n, int(g.status))
+	put(&k, &n, g.coins)
+	put(&k, &n, g.keys)
+	put(&k, &n, g.points)
+	for i in 0 ..< MAX_GUARDS {
+		if i >= g.guard_count {
+			n += GUARD_KEY_BYTES
+			continue
+		}
 		gd := g.guards[i]
-		o := 6 + i * GUARD_KEY_BYTES
-		k[o + 0] = u8(gd.pos.x)
-		k[o + 1] = u8(gd.pos.y)
-		k[o + 2] = u8(gd.facing)
-		k[o + 3] = u8(gd.patrol_idx)
-		k[o + 4] = u8(gd.mode)
-		k[o + 5] = u8(gd.timer)
-		k[o + 6] = u8(gd.target.x)
-		k[o + 7] = u8(gd.target.y)
-		k[o + 8] = u8(gd.home.x)
-		k[o + 9] = u8(gd.home.y)
-		k[o + 10] = u8(gd.home_facing)
-		k[o + 11] = u8(gd.has_key)
+		put(&k, &n, gd.pos.x)
+		put(&k, &n, gd.pos.y)
+		put(&k, &n, int(gd.facing))
+		put(&k, &n, gd.patrol_idx)
+		put(&k, &n, int(gd.mode))
+		put(&k, &n, gd.timer)
+		put(&k, &n, gd.target.x)
+		put(&k, &n, gd.target.y)
+		put(&k, &n, gd.home.x)
+		put(&k, &n, gd.home.y)
+		put(&k, &n, int(gd.home_facing))
+		put(&k, &n, int(gd.has_key))
+		put(&k, &n, gd.stun)
+		put(&k, &n, int(gd.turned))
+		put(&k, &n, int(gd.pre_look))
 	}
 	// Which doors are still locked.
 	for y in 0 ..< ROWS {
 		for x in 0 ..< COLS {
 			if g.tiles[y][x] == .Door {
 				bit := y * COLS + x
-				k[6 + MAX_GUARDS * GUARD_KEY_BYTES + bit / 8] |= 1 << uint(bit % 8)
+				k[n + bit / 8] |= 1 << uint(bit % 8)
 			}
 		}
 	}

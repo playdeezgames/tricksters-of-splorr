@@ -189,7 +189,7 @@ solve_from :: proc(start: Game) -> int {
 }
 
 // Breadth-first search; also returns the winning actions as text (U D L R . for moves and wait,
-// u d l r for coin tosses, p for a pickpocket) so a human can replay the level.
+// u d l r for coin tosses, p for a pickpocket, ^ v < > for Look over there) so a human can replay the level.
 solve_with_path :: proc(start: Game) -> (turns: int, path: string) {
 	Node :: struct {
 		game:   Game,
@@ -205,6 +205,7 @@ solve_with_path :: proc(start: Game) -> (turns: int, path: string) {
 	glyph := [Action]u8{
 		.Move_Up = 'U', .Move_Down = 'D', .Move_Left = 'L', .Move_Right = 'R', .Wait = '.',
 		.Toss_Up = 'u', .Toss_Down = 'd', .Toss_Left = 'l', .Toss_Right = 'r', .Pickpocket = 'p',
+		.Point_Up = '^', .Point_Down = 'v', .Point_Left = '<', .Point_Right = '>',
 	}
 	for head := 0; head < len(nodes); head += 1 {
 		for a in Action {
@@ -460,6 +461,88 @@ pickpocket_is_undoable :: proc(t: ^testing.T) {
 	game_load(&g, l)
 	start := g
 	testing.expect(t, play(h, &g, .Pickpocket))
+	testing.expect(t, undo(h, &g))
+	testing.expect(t, g == start)
+}
+
+@(test)
+pointing_turns_the_nearest_guard_then_it_turns_back :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@.v............#")
+	l.points = 1
+	g: Game
+	game_load(&g, l)
+	testing.expect_value(t, g.guards[0].facing, Dir.Down)
+	testing.expect(t, take_turn(&g, .Point_Right))
+	testing.expect_value(t, g.points, 0)
+	testing.expect_value(t, g.guards[0].facing, Dir.Right)
+	take_turn(&g, .Wait)
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.guards[0].facing, Dir.Right) // three end-of-turn states in all
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.guards[0].facing, Dir.Down)
+	testing.expect_value(t, g.guards[0].pos, [2]int{3, 1})
+}
+
+@(test)
+pointing_needs_a_guard_in_line_in_range_with_clear_sight :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@...v...........#", "#...............#")
+	l.points = 3
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, !take_turn(&g, .Point_Right)) // guard four tiles away
+	testing.expect(t, !take_turn(&g, .Point_Down)) // nobody that way
+	g.player = {3, 1}
+	g.tiles[1][4] = .Wall
+	testing.expect(t, !take_turn(&g, .Point_Right)) // a wall in between
+	testing.expect_value(t, g.points, 3) // nothing was spent
+	g.tiles[1][4] = .Floor
+	testing.expect(t, take_turn(&g, .Point_Right))
+}
+
+@(test)
+pointing_without_uses_does_nothing :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@.v............#"))
+	before := g
+	testing.expect(t, !take_turn(&g, .Point_Right))
+	testing.expect(t, g == before)
+}
+
+@(test)
+pointed_patrol_guard_pauses_and_resumes :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@>..............#")
+	l.points = 1
+	l.patrols[0] = "RRLL"
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, take_turn(&g, .Point_Right))
+	for _ in 0 ..< 2 {
+		take_turn(&g, .Wait)
+	}
+	testing.expect_value(t, g.guards[0].pos, [2]int{2, 1}) // frozen for the three turns
+	testing.expect_value(t, g.guards[0].patrol_idx, 0)
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.guards[0].pos, [2]int{3, 1}) // the patrol carries on from its first step
+}
+
+@(test)
+look_level_needs_the_point :: proc(t: ^testing.T) {
+	l := levels[3]
+	testing.expect(t, solve(l) > 0)
+	l.points = 0
+	testing.expect_value(t, solve(l), -1)
+}
+
+@(test)
+point_is_undoable :: proc(t: ^testing.T) {
+	h := new(History)
+	defer free(h)
+	l := room(EMPTY, "#@.v............#")
+	l.points = 1
+	g: Game
+	game_load(&g, l)
+	start := g
+	testing.expect(t, play(h, &g, .Point_Right))
 	testing.expect(t, undo(h, &g))
 	testing.expect(t, g == start)
 }

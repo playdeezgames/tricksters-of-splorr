@@ -39,10 +39,15 @@ ctx: runtime.Context
 game: Game
 history: ^History
 level_index: int
-aiming: bool // T was pressed: the next direction key tosses a coin
+Aim :: enum {
+	None,
+	Coin,  // T was pressed: the next direction key tosses a coin
+	Point, // L was pressed: the next direction key points ("Look over there!")
+}
+aiming: Aim
 
 restart :: proc() {
-	aiming = false
+	aiming = .None
 	game_load(&game, levels[level_index])
 	history.count = 0
 }
@@ -81,20 +86,25 @@ on_key :: proc(e: js.Event) {
 		}
 	}
 	if a, ok := act.?; ok {
-		if aiming && int(a) <= int(Action.Move_Right) {
-			a = Action(int(a) + int(Action.Toss_Up))
+		if int(a) <= int(Action.Move_Right) {
+			switch aiming {
+			case .None:
+			case .Coin:  a = Action(int(a) + int(Action.Toss_Up))
+			case .Point: a = Action(int(a) + int(Action.Point_Up))
+			}
 		}
-		aiming = false
+		aiming = .None
 		play(history, &game, a)
 		js.event_prevent_default()
 		return
 	}
-	aiming = false
+	aiming = .None
 	switch e.key.key {
 	case "z", "Z": undo(history, &game)
 	case "r", "R": restart()
 	case "p", "P": play(history, &game, .Pickpocket)
-	case "t", "T": aiming = game.coins > 0 && game.status == .Playing
+	case "t", "T": if game.coins > 0 && game.status == .Playing { aiming = .Coin }
+	case "l", "L": if game.points > 0 && game.status == .Playing { aiming = .Point }
 	case "Enter":
 		if game.status == .Won {
 			level_index = (level_index + 1) % len(levels)
@@ -143,33 +153,50 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			text("?", gx + 6, gy - 8, 8, 0xffd060)
 		}
 		sprite(.People, 3, 2, gx, gy, 0xff6060)
+		if gd.turned {
+			text("!", gx + 7, gy - 8, 8, 0x60c0ff)
+		}
 		if gd.has_key {
 			sprite(.Tools, 0, 6, gx + 6, gy - 9, 0xffd060)
 		}
 	}
-	if aiming {
-		for d in Dir {
-			if land, ok := coin_landing(&game, d); ok {
-				fill_rect(f32(GRID_X + land.x * TILE), f32(GRID_Y + land.y * TILE), TILE, TILE, 1, 0.82, 0.38, 0.5)
+	for d in Dir {
+		land: [2]int
+		ok: bool
+		switch aiming {
+		case .None: continue
+		case .Coin: land, ok = coin_landing(&game, d)
+		case .Point:
+			if gi, found := look_target(&game, d); found {
+				land, ok = game.guards[gi].pos, true
 			}
+		}
+		if ok {
+			fill_rect(f32(GRID_X + land.x * TILE), f32(GRID_Y + land.y * TILE), TILE, TILE, 1, 0.82, 0.38, 0.5)
 		}
 	}
 	sprite(.People, 0, 2, f32(GRID_X + game.player.x * TILE), f32(GRID_Y + game.player.y * TILE), 0xffffff)
 
 	text(levels[level_index].name, 10, 270, 6, 0x7a6a9a)
 	buf: [16]u8
-	if game.coins > 0 || aiming {
-		text(fmt.bprintf(buf[:], "COINS %d", game.coins), 330, 4, 8, 0xffd060)
+	hud_y: f32 = 4
+	if game.coins > 0 {
+		text(fmt.bprintf(buf[:], "COINS %d", game.coins), 320, hud_y, 8, 0xffd060)
+		hud_y += 10
+	}
+	if game.points > 0 {
+		text(fmt.bprintf(buf[:], "LOOKS %d", game.points), 320, hud_y, 8, 0x60c0ff)
+		hud_y += 10
 	}
 	if game.keys > 0 {
-		text(fmt.bprintf(buf[:], "KEYS %d", game.keys), 330, 14, 8, 0xffd060)
+		text(fmt.bprintf(buf[:], "KEYS %d", game.keys), 320, hud_y, 8, 0xffd060)
 	}
 	switch game.status {
 	case .Playing:
-		if aiming {
-			text("TOSS WHICH WAY? (ANY OTHER KEY CANCELS)", 10, 282, 6, 0xffd060)
-		} else {
-			text("ARROWS MOVE  SPACE WAIT  T COIN  P PICKPOCKET  Z UNDO  R RESTART", 10, 282, 6, 0xa090c0)
+		switch aiming {
+		case .Coin:  text("TOSS WHICH WAY? (ANY OTHER KEY CANCELS)", 10, 282, 6, 0xffd060)
+		case .Point: text("POINT WHICH WAY? (ANY OTHER KEY CANCELS)", 10, 282, 6, 0x60c0ff)
+		case .None:  text("ARROWS MOVE SPACE WAIT T COIN L LOOK P PICK Z UNDO R RESTART", 10, 282, 6, 0xa090c0)
 		}
 	case .Caught:  text("SPOTTED!  Z TO UNDO, R TO RESTART", 10, 282, 8, 0xff6060)
 	case .Won:     text("CURTAIN CALL!  SPACE FOR THE NEXT ACT", 10, 282, 8, 0x60d080)
