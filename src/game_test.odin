@@ -546,3 +546,107 @@ point_is_undoable :: proc(t: ^testing.T) {
 	testing.expect(t, undo(h, &g))
 	testing.expect(t, g == start)
 }
+
+@(test)
+red_hat_fools_red_guards_but_not_blue :: proc(t: ^testing.T) {
+	// Red guard at (4,1) sees (3,1) (2,1) (1,1); blue guard at (8,1) sees (7,1) (6,1) (5,1).
+	l := room(EMPTY, "#...<...<.......#", "#..............#")
+	l.blue[1] = true
+	g: Game
+	game_load(&g, l)
+	g.disguise = .Red
+	g.disguise_turns = 3
+	testing.expect(t, !seen(&g, {2, 1})) // in the red cone, in a red hat
+	testing.expect(t, seen(&g, {6, 1}))  // in the blue cone, in a red hat
+	g.disguise = .Blue
+	testing.expect(t, seen(&g, {2, 1}))  // a blue hat does not fool the red guard
+	testing.expect(t, !seen(&g, {6, 1}))
+	g.disguise_turns = 0
+	testing.expect(t, seen(&g, {2, 1}))  // the hat has run out
+}
+
+@(test)
+hat_is_picked_up_and_counts_down :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@h.............#"))
+	testing.expect(t, take_turn(&g, .Move_Right))
+	testing.expect_value(t, g.disguise, Faction.Red)
+	testing.expect_value(t, g.disguise_turns, HAT_TURNS - 1) // the pickup turn used one
+	testing.expect_value(t, g.tiles[1][2], Tile.Floor)
+	for _ in 0 ..< HAT_TURNS - 1 {
+		take_turn(&g, .Wait)
+	}
+	testing.expect_value(t, g.disguise_turns, 0)
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.disguise_turns, 0)
+}
+
+@(test)
+disguise_runs_out_in_the_cone_and_you_are_caught :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@h..<...........#")
+	g: Game
+	game_load(&g, l)
+	// The red guard at (5,1) faces left: (4,1) (3,1) (2,1) are watched. Take the hat, then wait it out.
+	testing.expect(t, take_turn(&g, .Move_Right))
+	testing.expect_value(t, g.status, Status.Playing) // fooled
+	for _ in 0 ..< HAT_TURNS - 1 {
+		take_turn(&g, .Wait)
+		testing.expect_value(t, g.status, Status.Playing)
+	}
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.status, Status.Caught)
+}
+
+@(test)
+a_second_hat_replaces_the_first :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@hH............#"))
+	take_turn(&g, .Move_Right)
+	take_turn(&g, .Move_Right)
+	testing.expect_value(t, g.disguise, Faction.Blue)
+	testing.expect_value(t, g.disguise_turns, HAT_TURNS - 1)
+}
+
+@(test)
+guards_are_solid :: proc(t: ^testing.T) {
+	g: Game
+	game_load(&g, room(EMPTY, "#@>..............#"))
+	g.disguise = .Red
+	g.disguise_turns = 3
+	before := g
+	testing.expect(t, !take_turn(&g, .Move_Right))
+	testing.expect(t, g == before)
+}
+
+@(test)
+fooled_guard_does_not_step_onto_the_player :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@<..............#")
+	l.patrols[0] = "L"
+	g: Game
+	game_load(&g, l)
+	g.disguise = .Red
+	g.disguise_turns = 3
+	take_turn(&g, .Wait)
+	testing.expect_value(t, g.guards[0].pos, [2]int{2, 1})
+	testing.expect_value(t, g.status, Status.Playing)
+}
+
+@(test)
+hat_level_needs_the_hat :: proc(t: ^testing.T) {
+	l := levels[4]
+	testing.expect(t, solve(l) > 0)
+	l.rows[5] = "#..........<...#" // the same row without the hat
+	testing.expect_value(t, solve(l), -1)
+}
+
+@(test)
+hat_is_undoable :: proc(t: ^testing.T) {
+	h := new(History)
+	defer free(h)
+	g: Game
+	game_load(&g, room(EMPTY, "#@h.............#"))
+	start := g
+	testing.expect(t, play(h, &g, .Move_Right))
+	testing.expect(t, undo(h, &g))
+	testing.expect(t, g == start)
+}

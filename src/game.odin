@@ -15,6 +15,7 @@ COIN_RANGE  :: 4 // a tossed coin flies this far in a straight line, or until a 
 HEARING     :: 5 // guards this close (in tiles, Manhattan) to where the coin lands go and look
 STARE_TURNS :: 2 // turns a guard stays at the coin before walking home
 LOOK_RANGE  :: 3 // "Look over there!" reaches the first guard this close in a straight line
+HAT_TURNS   :: 6 // end-of-turn checks a hat covers, the turn you pick it up included
 LOOK_TURNS  :: 3 // the guard faces the way you pointed for this many turns, the pointing turn included
 
 Tile :: enum u8 {
@@ -22,6 +23,8 @@ Tile :: enum u8 {
 	Wall,
 	Prize,
 	Exit,
+	Hat_Red,  // picking one up disguises you as that faction
+	Hat_Blue,
 	Door, // locked: blocks movement and sight until the player walks into it holding a key
 }
 
@@ -48,6 +51,12 @@ Action :: enum {
 	Point_Down,
 	Point_Left,
 	Point_Right,
+}
+
+// A disguise hides the player from guards of the same faction only.
+Faction :: enum u8 {
+	Red,
+	Blue,
 }
 
 // Patrol follows the patrol string. A coin sends the guard to Investigate its landing tile,
@@ -77,6 +86,7 @@ Guard :: struct {
 	home:       [2]int,
 	home_facing: Dir,
 	has_key:    bool,
+	faction:    Faction,
 	stun:       int,  // turns left of being made to look away
 	turned:     bool, // facing is overridden; pre_look is restored when the stun ends
 	pre_look:   Dir,
@@ -92,6 +102,8 @@ Game :: struct {
 	coins:       int,
 	keys:        int,
 	points:      int,
+	disguise:    Faction, // meaningful while disguise_turns > 0
+	disguise_turns: int,
 	status:      Status,
 	turn:        int,
 }
@@ -108,6 +120,7 @@ Level :: struct {
 	rows:    [ROWS]string,
 	patrols: [MAX_GUARDS]string, // one per guard, in reading order of the map
 	keyed:   [MAX_GUARDS]bool,   // which guards carry a key
+	blue:    [MAX_GUARDS]bool,   // which guards are Blue (the rest are Red)
 }
 
 // Walls and locked doors stop guards, sight and coins.
@@ -129,7 +142,7 @@ in_bounds :: proc(p: [2]int) -> bool {
 	return p.x >= 0 && p.x < COLS && p.y >= 0 && p.y < ROWS
 }
 
-// Map glyphs: '#' wall, 'D' locked door, '$' prize, 'E' exit, '@' player start, '^' 'v' '<' '>' a guard facing that way.
+// Map glyphs: 'h' red hat, 'H' blue hat, '#' wall, 'D' locked door, '$' prize, 'E' exit, '@' player start, '^' 'v' '<' '>' a guard facing that way.
 game_load :: proc(g: ^Game, level: Level) {
 	g^ = {}
 	g.coins = level.coins
@@ -142,6 +155,8 @@ game_load :: proc(g: ^Game, level: Level) {
 			case '$': g.tiles[y][x] = .Prize
 			case 'E': g.tiles[y][x] = .Exit
 			case 'D': g.tiles[y][x] = .Door
+			case 'h': g.tiles[y][x] = .Hat_Red
+			case 'H': g.tiles[y][x] = .Hat_Blue
 			case '@': g.player = {x, y}
 			case '^', 'v', '<', '>':
 				if g.guard_count < MAX_GUARDS {
@@ -159,6 +174,7 @@ game_load :: proc(g: ^Game, level: Level) {
 					}
 					gd.patrol_len = min(len(patrol), MAX_PATROL)
 					gd.has_key = level.keyed[g.guard_count]
+					gd.faction = level.blue[g.guard_count] ? .Blue : .Red
 					g.guard_count += 1
 				}
 			}
@@ -191,11 +207,19 @@ cone_cells :: proc(g: ^Game, gd: Guard, out: ^[SIGHT_RANGE][2]int) -> int {
 	return n
 }
 
-// True if any guard sees p, or stands on it.
+// A guard is fooled while the player wears a hat of its own faction.
+fooled :: proc(g: ^Game, gd: Guard) -> bool {
+	return g.disguise_turns > 0 && g.disguise == gd.faction
+}
+
+// True if any guard that is not fooled sees p, or stands on it.
 seen :: proc(g: ^Game, p: [2]int) -> bool {
 	cone: [SIGHT_RANGE][2]int
 	for i in 0 ..< g.guard_count {
 		gd := g.guards[i]
+		if fooled(g, gd) {
+			continue
+		}
 		if gd.pos == p {
 			return true
 		}
@@ -251,7 +275,9 @@ path_step :: proc(g: ^Game, from, to: [2]int) -> (d: Dir, ok: bool) {
 move_toward :: proc(g: ^Game, gd: ^Guard, to: [2]int) {
 	if d, ok := path_step(g, gd.pos, to); ok {
 		gd.facing = d
-		gd.pos += dir_delta(d)
+		if !(fooled(g, gd^) && gd.pos + dir_delta(d) == g.player) {
+			gd.pos += dir_delta(d)
+		}
 	}
 }
 
@@ -271,7 +297,7 @@ patrol_step :: proc(g: ^Game, gd: ^Guard) {
 	}
 	gd.facing = d
 	to := gd.pos + dir_delta(d)
-	if in_bounds(to) && !blocks(g.tiles[to.y][to.x]) && !guard_at(g, to) {
+	if in_bounds(to) && !blocks(g.tiles[to.y][to.x]) && !guard_at(g, to) && !(fooled(g, gd^) && to == g.player) {
 		gd.pos = to
 	}
 }
@@ -400,6 +426,9 @@ take_turn :: proc(g: ^Game, a: Action) -> bool {
 		if !in_bounds(to) || g.tiles[to.y][to.x] == .Wall {
 			return false
 		}
+		if guard_at(g, to) {
+			return false // guards are solid, disguised or not
+		}
 		if g.tiles[to.y][to.x] == .Door {
 			if g.keys <= 0 {
 				return false
@@ -408,9 +437,15 @@ take_turn :: proc(g: ^Game, a: Action) -> bool {
 			g.tiles[to.y][to.x] = .Floor
 		}
 		g.player = to
-		if g.tiles[to.y][to.x] == .Prize {
+		switch g.tiles[to.y][to.x] {
+		case .Prize:
 			g.has_prize = true
 			g.tiles[to.y][to.x] = .Floor
+		case .Hat_Red, .Hat_Blue:
+			g.disguise = g.tiles[to.y][to.x] == .Hat_Red ? .Red : .Blue
+			g.disguise_turns = HAT_TURNS
+			g.tiles[to.y][to.x] = .Floor
+		case .Floor, .Wall, .Exit, .Door:
 		}
 	case .Pickpocket:
 		if !pick_pocket(g) {
@@ -448,6 +483,9 @@ take_turn :: proc(g: ^Game, a: Action) -> bool {
 	} else if g.has_prize && g.tiles[g.player.y][g.player.x] == .Exit {
 		g.status = .Won
 	}
+	if g.disguise_turns > 0 {
+		g.disguise_turns -= 1
+	}
 	return true
 }
 
@@ -476,10 +514,10 @@ undo :: proc(h: ^History, g: ^Game) -> bool {
 }
 
 // Everything that distinguishes two states for the solver (the turn counter is left out).
-GUARD_KEY_BYTES :: 15
-HEADER_KEY_BYTES :: 7
+GUARD_KEY_BYTES :: 16
+HEADER_KEY_BYTES :: 9
 DOOR_KEY_BYTES  :: (ROWS * COLS + 7) / 8
-State_Key :: [HEADER_KEY_BYTES + MAX_GUARDS * GUARD_KEY_BYTES + DOOR_KEY_BYTES]u8
+State_Key :: [HEADER_KEY_BYTES + MAX_GUARDS * GUARD_KEY_BYTES + 2 * DOOR_KEY_BYTES]u8
 
 state_key :: proc(g: ^Game) -> (k: State_Key) {
 	n := 0
@@ -494,6 +532,8 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 	put(&k, &n, g.coins)
 	put(&k, &n, g.keys)
 	put(&k, &n, g.points)
+	put(&k, &n, int(g.disguise))
+	put(&k, &n, g.disguise_turns)
 	for i in 0 ..< MAX_GUARDS {
 		if i >= g.guard_count {
 			n += GUARD_KEY_BYTES
@@ -515,13 +555,17 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 		put(&k, &n, gd.stun)
 		put(&k, &n, int(gd.turned))
 		put(&k, &n, int(gd.pre_look))
+		put(&k, &n, int(gd.faction))
 	}
-	// Which doors are still locked.
+	// Which doors are still locked, then which hats are still on the floor.
 	for y in 0 ..< ROWS {
 		for x in 0 ..< COLS {
-			if g.tiles[y][x] == .Door {
-				bit := y * COLS + x
+			bit := y * COLS + x
+			#partial switch g.tiles[y][x] {
+			case .Door:
 				k[n + bit / 8] |= 1 << uint(bit % 8)
+			case .Hat_Red, .Hat_Blue:
+				k[n + DOOR_KEY_BYTES + bit / 8] |= 1 << uint(bit % 8)
 			}
 		}
 	}

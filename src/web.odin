@@ -129,6 +129,8 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			case .Wall:  sprite(.Civilized, 4, 20, px, py, 0x6a5a8a)
 			case .Prize: sprite(.Jewelry, 0, 0, px, py, 0xffd060)
 			case .Exit:  sprite(.Civilized, 6, 1, px, py, 0x60d080)
+			case .Hat_Red:  sprite(.Clothing, 2, 0, px, py, 0xff6060)
+			case .Hat_Blue: sprite(.Clothing, 2, 0, px, py, 0x6090ff)
 			case .Door:
 				sprite(.Civilized, 4, 20, px, py, 0xc07030)
 				sprite(.Tools, 2, 5, px, py, 0xffd060)
@@ -141,7 +143,12 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 		gd := game.guards[i]
 		n := cone_cells(&game, gd, &cone)
 		for c in cone[:n] {
-			fill_rect(f32(GRID_X + c.x * TILE), f32(GRID_Y + c.y * TILE), TILE, TILE, 0.9, 0.2, 0.2, 0.35)
+			alpha: f32 = fooled(&game, gd) ? 0.1 : 0.35
+			if gd.faction == .Red {
+				fill_rect(f32(GRID_X + c.x * TILE), f32(GRID_Y + c.y * TILE), TILE, TILE, 0.9, 0.2, 0.2, alpha)
+			} else {
+				fill_rect(f32(GRID_X + c.x * TILE), f32(GRID_Y + c.y * TILE), TILE, TILE, 0.25, 0.4, 0.95, alpha)
+			}
 		}
 	}
 	for i in 0 ..< game.guard_count {
@@ -152,7 +159,7 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			sprite(.UI, 0, 0, f32(GRID_X + gd.target.x * TILE), f32(GRID_Y + gd.target.y * TILE), 0xffd060)
 			text("?", gx + 6, gy - 8, 8, 0xffd060)
 		}
-		sprite(.People, 3, 2, gx, gy, 0xff6060)
+		sprite(.People, 3, 2, gx, gy, gd.faction == .Red ? 0xff6060 : 0x6090ff)
 		if gd.turned {
 			text("!", gx + 7, gy - 8, 8, 0x60c0ff)
 		}
@@ -175,7 +182,12 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			fill_rect(f32(GRID_X + land.x * TILE), f32(GRID_Y + land.y * TILE), TILE, TILE, 1, 0.82, 0.38, 0.5)
 		}
 	}
-	sprite(.People, 0, 2, f32(GRID_X + game.player.x * TILE), f32(GRID_Y + game.player.y * TILE), 0xffffff)
+	px := f32(GRID_X + game.player.x * TILE)
+	py := f32(GRID_Y + game.player.y * TILE)
+	sprite(.People, 0, 2, px, py, 0xffffff)
+	if game.disguise_turns > 0 {
+		sprite(.Clothing, 2, 0, px, py - 7, game.disguise == .Red ? 0xff6060 : 0x6090ff)
+	}
 
 	text(levels[level_index].name, 10, 270, 6, 0x7a6a9a)
 	buf: [16]u8
@@ -190,6 +202,10 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 	}
 	if game.keys > 0 {
 		text(fmt.bprintf(buf[:], "KEYS %d", game.keys), 320, hud_y, 8, 0xffd060)
+		hud_y += 10
+	}
+	if game.disguise_turns > 0 {
+		text(fmt.bprintf(buf[:], "HAT %d", game.disguise_turns), 320, hud_y, 8, game.disguise == .Red ? 0xff6060 : 0x6090ff)
 	}
 	switch game.status {
 	case .Playing:
