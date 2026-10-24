@@ -3,6 +3,7 @@ package tricksters
 
 import "core:log"
 import "core:slice"
+import "core:strings"
 import "core:testing"
 
 // Run with: odin test src -define:ODIN_TEST_THREADS=1
@@ -183,6 +184,8 @@ solve_unguarded :: proc(level: Level) -> int {
 	return solve_from(start)
 }
 
+SOLVER_NODE_CAP :: 1_000_000
+
 solve_from :: proc(start: Game) -> int {
 	turns, _ := solve_with_path(start)
 	return turns
@@ -191,47 +194,65 @@ solve_from :: proc(start: Game) -> int {
 // Breadth-first search; also returns the winning actions as text (U D L R . for moves and wait,
 // u d l r for coin tosses, p for a pickpocket, ^ v < > for Look over there) so a human can replay the level.
 solve_with_path :: proc(start: Game) -> (turns: int, path: string) {
-	Node :: struct {
-		game:   Game,
+	// Only the frontier keeps whole games; every state ever seen keeps just its parent and action.
+	Meta :: struct {
 		parent: int,
 		action: Action,
 	}
-	nodes := make([dynamic]Node)
-	defer delete(nodes)
+	Entry :: struct {
+		game: Game,
+		meta: int,
+	}
+	metas := make([dynamic]Meta)
+	defer delete(metas)
 	visited := make(map[State_Key]struct{})
 	defer delete(visited)
-	append(&nodes, Node{game = start, parent = -1})
-	visited[state_key(&nodes[0].game)] = {}
+	cur := make([dynamic]Entry)
+	next := make([dynamic]Entry)
+	defer delete(cur)
+	defer delete(next)
+	start := start
+	append(&metas, Meta{parent = -1})
+	append(&cur, Entry{game = start, meta = 0})
+	visited[state_key(&start)] = {}
 	glyph := [Action]u8{
 		.Move_Up = 'U', .Move_Down = 'D', .Move_Left = 'L', .Move_Right = 'R', .Wait = '.',
 		.Toss_Up = 'u', .Toss_Down = 'd', .Toss_Left = 'l', .Toss_Right = 'r', .Pickpocket = 'p',
 		.Point_Up = '^', .Point_Down = 'v', .Point_Left = '<', .Point_Right = '>',
 	}
-	for head := 0; head < len(nodes); head += 1 {
-		for a in Action {
-			n := nodes[head].game
-			if !take_turn(&n, a) {
-				continue
-			}
-			if n.status == .Won {
-				buf := make([dynamic]u8, context.temp_allocator)
-				append(&buf, glyph[a])
-				for i := head; nodes[i].parent >= 0; i = nodes[i].parent {
-					append(&buf, glyph[nodes[i].action])
-				}
-				slice.reverse(buf[:])
-				return n.turn, string(buf[:])
-			}
-			if n.status != .Playing {
-				continue
-			}
-			k := state_key(&n)
-			if k in visited {
-				continue
-			}
-			visited[k] = {}
-			append(&nodes, Node{game = n, parent = head, action = a})
+	for len(cur) > 0 {
+		if len(metas) > SOLVER_NODE_CAP {
+			return -2, "" // gave up: the state space is too big
 		}
+		clear(&next)
+		for entry in cur {
+			for a in Action {
+				n := entry.game
+				if !take_turn(&n, a) {
+					continue
+				}
+				if n.status == .Won {
+					buf := make([dynamic]u8, context.temp_allocator)
+					append(&buf, glyph[a])
+					for i := entry.meta; metas[i].parent >= 0; i = metas[i].parent {
+						append(&buf, glyph[metas[i].action])
+					}
+					slice.reverse(buf[:])
+					return n.turn, string(buf[:])
+				}
+				if n.status != .Playing {
+					continue
+				}
+				k := state_key(&n)
+				if k in visited {
+					continue
+				}
+				visited[k] = {}
+				append(&metas, Meta{parent = entry.meta, action = a})
+				append(&next, Entry{game = n, meta = len(metas) - 1})
+			}
+		}
+		cur, next = next, cur
 	}
 	return -1, ""
 }
@@ -709,5 +730,112 @@ every_event_has_short_lines_and_every_level_has_patter :: proc(t: ^testing.T) {
 		testing.expectf(t, len(l.intro) > 0 && len(l.intro) <= LINE_MAX, "bad intro for %q", l.name)
 		testing.expectf(t, l.act >= prev_act && l.act >= 1 && l.act < len(ACT_TITLES), "bad act for %q", l.name)
 		prev_act = l.act
+	}
+}
+
+// Design aid: tools/test.sh -define:LEVEL=7 -define:ODIN_TEST_NAMES=tricksters.solve_one_level
+LEVEL :: #config(LEVEL, 1)
+
+@(test)
+solve_one_level :: proc(t: ^testing.T) {
+	if LEVEL < 1 || LEVEL > len(levels) {
+		return
+	}
+	l := levels[LEVEL - 1]
+	turns, path := solve_with_path(start_of(l))
+	log.infof("LEVEL %d %q: turns %d (-1 unsolvable, -2 gave up) solution %s", LEVEL, l.name, turns, path)
+}
+
+// A copy of the level with every hat tile turned into plain floor.
+without_hats :: proc(l: Level) -> Level {
+	l := l
+	for &row in l.rows {
+		r, _ := strings.replace_all(row, "h", ".", context.temp_allocator)
+		r, _ = strings.replace_all(r, "H", ".", context.temp_allocator)
+		row = r
+	}
+	return l
+}
+
+@(test)
+pickpocket_from_the_front_works_in_the_right_hat :: proc(t: ^testing.T) {
+	l := room(EMPTY, "#@<.............#")
+	l.keyed[0] = true
+	g: Game
+	game_load(&g, l)
+	testing.expect(t, !take_turn(&g, .Pickpocket)) // in its cone: refused
+	g.disguise = .Red
+	g.disguise_turns = 3
+	testing.expect(t, take_turn(&g, .Pickpocket)) // fooled: allowed
+	testing.expect_value(t, g.keys, 1)
+	g.disguise = .Blue // a hat of the wrong colour would not do
+	game_load(&g, l)
+	g.disguise = .Blue
+	g.disguise_turns = 3
+	testing.expect(t, !take_turn(&g, .Pickpocket))
+}
+
+@(test)
+keys_and_coins_needs_both :: proc(t: ^testing.T) {
+	l := levels[5]
+	testing.expect(t, solve(l) > 0)
+	c := l
+	c.coins = 0
+	testing.expect_value(t, solve(c), -1)
+	k := l
+	k.keyed = {}
+	testing.expect_value(t, solve(k), -1)
+}
+
+@(test)
+right_place_right_hat_needs_both :: proc(t: ^testing.T) {
+	l := levels[6]
+	testing.expect(t, solve(l) > 0)
+	p := l
+	p.points = 0
+	testing.expect_value(t, solve(p), -1)
+	testing.expect_value(t, solve(without_hats(l)), -1)
+}
+
+@(test)
+face_to_face_needs_the_hat :: proc(t: ^testing.T) {
+	l := levels[7]
+	testing.expect(t, solve(l) > 0)
+	testing.expect_value(t, solve(without_hats(l)), -1)
+}
+
+@(test)
+grand_illusion_needs_all_three :: proc(t: ^testing.T) {
+	l := levels[8]
+	testing.expect(t, solve(l) > 0)
+	p := l
+	p.points = 0
+	testing.expect_value(t, solve(p), -1)
+	k := l
+	k.keyed = {}
+	testing.expect_value(t, solve(k), -1)
+	testing.expect_value(t, solve(without_hats(l)), -1)
+}
+
+@(test)
+the_finale_needs_every_trick :: proc(t: ^testing.T) {
+	l := levels[9]
+	testing.expect(t, solve(l) > 0)
+	c := l
+	c.coins = 0
+	testing.expect_value(t, solve(c), -1)
+	p := l
+	p.points = 0
+	testing.expect_value(t, solve(p), -1)
+	k := l
+	k.keyed = {}
+	testing.expect_value(t, solve(k), -1)
+	testing.expect_value(t, solve(without_hats(l)), -1)
+}
+
+@(test)
+only_the_last_level_is_the_finale :: proc(t: ^testing.T) {
+	for l, i in levels {
+		testing.expect_value(t, l.finale, i == len(levels) - 1)
 	}
 }

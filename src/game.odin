@@ -115,6 +115,7 @@ History :: struct {
 
 Level :: struct {
 	name:    string,
+	finale:  bool,   // the last level: its guards turn out to be the audience
 	intro:   string, // the trickster's patter when the level starts
 	act:     int,    // index into ACT_TITLES; a change of act shows an act card
 	par:     int,    // the solver's shortest winning run (a test keeps this honest)
@@ -358,7 +359,8 @@ coin_landing :: proc(g: ^Game, d: Dir) -> (land: [2]int, ok: bool) {
 	return
 }
 
-// Takes the key from the first adjacent guard that has one and is not looking at the player.
+// Takes the key from the first adjacent guard that has one and is not looking at the player
+// (or is fooled by the player's disguise).
 pick_pocket :: proc(g: ^Game) -> bool {
 	cone: [SIGHT_RANGE][2]int
 	for i in 0 ..< g.guard_count {
@@ -371,7 +373,7 @@ pick_pocket :: proc(g: ^Game) -> bool {
 		for c in cone[:n] {
 			watched ||= c == g.player
 		}
-		if watched {
+		if watched && !fooled(g, gd^) { // a guard in your colour's hat lets you come at it from the front
 			continue
 		}
 		gd.has_key = false
@@ -535,7 +537,8 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 	put(&k, &n, g.coins)
 	put(&k, &n, g.keys)
 	put(&k, &n, g.points)
-	put(&k, &n, int(g.disguise))
+	// A disguise that has run out is the same as none.
+	put(&k, &n, g.disguise_turns > 0 ? int(g.disguise) : 0)
 	put(&k, &n, g.disguise_turns)
 	for i in 0 ..< MAX_GUARDS {
 		if i >= g.guard_count {
@@ -543,21 +546,34 @@ state_key :: proc(g: ^Game) -> (k: State_Key) {
 			continue
 		}
 		gd := g.guards[i]
+		// Leave out fields the guard's current mode never reads, so histories that differ only in
+		// stale values (an old coin tile, an old home) count as the same state.
+		target, home, home_facing, timer := gd.target, gd.home, gd.home_facing, gd.timer
+		switch gd.mode {
+		case .Patrol:
+			target, home, home_facing, timer = {}, {}, {}, 0
+		case .Investigate:
+			timer = 0
+		case .Stare:
+			target = {}
+		case .Return:
+			target, timer = {}, 0
+		}
 		put(&k, &n, gd.pos.x)
 		put(&k, &n, gd.pos.y)
 		put(&k, &n, int(gd.facing))
 		put(&k, &n, gd.patrol_idx)
 		put(&k, &n, int(gd.mode))
-		put(&k, &n, gd.timer)
-		put(&k, &n, gd.target.x)
-		put(&k, &n, gd.target.y)
-		put(&k, &n, gd.home.x)
-		put(&k, &n, gd.home.y)
-		put(&k, &n, int(gd.home_facing))
+		put(&k, &n, timer)
+		put(&k, &n, target.x)
+		put(&k, &n, target.y)
+		put(&k, &n, home.x)
+		put(&k, &n, home.y)
+		put(&k, &n, int(home_facing))
 		put(&k, &n, int(gd.has_key))
 		put(&k, &n, gd.stun)
 		put(&k, &n, int(gd.turned))
-		put(&k, &n, int(gd.pre_look))
+		put(&k, &n, gd.turned ? int(gd.pre_look) : 0)
 		put(&k, &n, int(gd.faction))
 	}
 	// Which doors are still locked, then which hats are still on the floor.

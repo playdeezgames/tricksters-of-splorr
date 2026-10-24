@@ -86,6 +86,9 @@ NARRATION := [Event][]string {
 	},
 }
 
+// Said when the finale is cleared: the guards were the audience all along.
+FINALE_LINE :: "They were the audience all along. Bravo!"
+
 // n is a running counter; the same event cycles through its lines.
 narrate :: proc(e: Event, n: int) -> string {
 	lines := NARRATION[e]
@@ -93,4 +96,4 @@ narrate :: proc(e: Event, n: int) -> string {
 }
 
 ACT_ROMAN := [?]string{"", "I", "II", "III", "IV", "V"}
-ACT_TITLES := [?]string{"", "THE WARM-UP", "STICKY FINGERS", "IN DISGUISE"}
+ACT_TITLES := [?]string{"", "THE WARM-UP", "STICKY FINGERS", "IN DISGUISE", "DOUBLE ACTS", "THE FINALE"}

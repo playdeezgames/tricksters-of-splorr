@@ -130,6 +130,9 @@ do_action :: proc(a: Action) {
 	ok := play(history, &game, a)
 	e := describe_turn(&before, &game, a, ok)
 	narration = narrate(e, narr_count)
+	if e == .Won && levels[level_index].finale {
+		narration = FINALE_LINE
+	}
 	narr_count += 1
 	sfx(sound_for_event(e))
 }
@@ -321,9 +324,13 @@ draw_stage :: proc() {
 		}
 	}
 
+	applause := levels[level_index].finale && game.status == .Won
 	cone: [SIGHT_RANGE][2]int
 	for i in 0 ..< game.guard_count {
 		gd := game.guards[i]
+		if applause {
+			continue
+		}
 		n := cone_cells(&game, gd, &cone)
 		for c in cone[:n] {
 			alpha: f32 = fooled(&game, gd) ? 0.1 : 0.35
@@ -345,6 +352,10 @@ draw_stage :: proc() {
 		sprite(.People, 3, 2, gx, gy, gd.faction == .Red ? 0xff6060 : 0x6090ff)
 		if gd.turned {
 			text("!", gx + 7, gy - 8, 8, 0x60c0ff)
+		}
+		if applause {
+			bounce: f32 = f32(int(clock * 4 + f64(i)) % 2) * 2
+			sprite(.UI, 9, 9, gx, gy - 12 - bounce, 0xff6080)
 		}
 		if gd.has_key {
 			sprite(.Tools, 0, 6, gx + 6, gy - 9, 0xffd060)
@@ -469,7 +480,7 @@ draw_end :: proc() {
 	fill_rect(0, 0, VIEW_W, VIEW_H, 0.05, 0.03, 0.08, 1)
 	draw_curtains(curtain)
 	text_c_shadow("THE END", 56, 24, 0xffd060)
-	text_c_shadow("THE CROWD SAW NOTHING AT ALL", 92, 8, 0xf0e6c8)
+	text_c_shadow("THE GUARDS WERE THE AUDIENCE ALL ALONG", 92, 8, 0xf0e6c8)
 	row_buf: [64]u8
 	y: f32 = 120
 	total, par_total := 0, 0
