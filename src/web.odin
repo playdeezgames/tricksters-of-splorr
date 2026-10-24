@@ -36,7 +36,13 @@ foreign canvas {
 
 ctx: runtime.Context
 game: Game
+history: ^History
 level_index: int
+
+restart :: proc() {
+	game_load(&game, levels[level_index])
+	history.count = 0
+}
 
 text :: proc(s: string, x, y, size: f32, color: u32) {
 	str := s
@@ -66,8 +72,13 @@ on_key :: proc(e: js.Event) {
 		}
 	}
 	if a, ok := act.?; ok {
-		take_turn(&game, a)
+		play(history, &game, a)
 		js.event_prevent_default()
+		return
+	}
+	switch e.key.key {
+	case "z", "Z": undo(history, &game)
+	case "r", "R": restart()
 	}
 }
 
@@ -90,14 +101,32 @@ step :: proc(dt: f64, c: runtime.Context) -> bool {
 			}
 		}
 	}
+
+	cone: [SIGHT_RANGE][2]int
+	for i in 0 ..< game.guard_count {
+		gd := game.guards[i]
+		n := cone_cells(&game, gd, &cone)
+		for c in cone[:n] {
+			fill_rect(f32(GRID_X + c.x * TILE), f32(GRID_Y + c.y * TILE), TILE, TILE, 0.9, 0.2, 0.2, 0.35)
+		}
+	}
+	for i in 0 ..< game.guard_count {
+		gd := game.guards[i]
+		sprite(.People, 3, 2, f32(GRID_X + gd.pos.x * TILE), f32(GRID_Y + gd.pos.y * TILE), 0xff6060)
+	}
 	sprite(.People, 0, 2, f32(GRID_X + game.player.x * TILE), f32(GRID_Y + game.player.y * TILE), 0xffffff)
 
-	text("ARROWS OR WASD MOVE, SPACE WAITS", 10, 270, 8, 0xa090c0)
+	switch game.status {
+	case .Playing: text("ARROWS/WASD MOVE  SPACE WAIT  Z UNDO  R RESTART", 10, 270, 6, 0xa090c0)
+	case .Caught:  text("SPOTTED!  Z TO UNDO, R TO RESTART", 10, 270, 8, 0xff6060)
+	case .Won:     text("CURTAIN CALL!  R TO PLAY AGAIN", 10, 270, 8, 0x60d080)
+	}
 	return true
 }
 
 main :: proc() {
 	ctx = context
-	game_load(&game, levels[level_index])
+	history = new(History)
+	restart()
 	js.add_window_event_listener(.Key_Down, nil, on_key)
 }

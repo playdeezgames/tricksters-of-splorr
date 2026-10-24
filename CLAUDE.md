@@ -24,11 +24,10 @@ Commands (the wasm must be served over http, not `file://`):
 ```bash
 tools/build.sh              # builds build/web (game.wasm, odin.js, index.html, assets); pass -o:size to ship
 tools/serve.sh 8123         # serves build/web
+tools/test.sh               # native tests; one test: tools/test.sh -define:ODIN_TEST_NAMES=tricksters.undo_restores_exactly
 ```
 
-Layout so far: `src/game.odin` (pure rules, `take_turn`), `src/levels.odin` (ASCII maps), `src/web.odin` (`#+build js`: canvas imports, input, `step`), `web/index.html` (canvas shim, sheet loading; its `SHEETS` order must match the `Sheet` enum in `web.odin`). The canvas is 400x300 logical pixels, scaled by a whole number; sprites are 10 px cells drawn at 20 px, white ink tinted by the page.
-
-Native tests (once they exist): `odin test src -define:ODIN_TEST_THREADS=1`. Run one test with `-define:ODIN_TEST_NAMES=pkg.test_name`.
+Layout so far: `src/game.odin` (pure rules: `take_turn` runs player then guards then judges Caught/Won; `play`/`undo` keep snapshot history; `Game` must stay plain data so copies are snapshots; `state_key` feeds the solver), `src/levels.odin` (ASCII maps plus per-guard patrol strings), `src/game_test.odin` (`#+build !js`; includes a BFS `solve` whose result is each level's par and which `every_level_is_solvable` runs), `src/web.odin` (`#+build js`: canvas imports, input, `step`), `web/index.html` (canvas shim, sheet loading; its `SHEETS` order must match the `Sheet` enum in `web.odin`). The canvas is 400x300 logical pixels, scaled by a whole number; sprites are 10 px cells drawn at 20 px, white ink tinted by the page.
 
 ## The bok (shared knowledge base)
 
