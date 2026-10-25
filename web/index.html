@@ -31,12 +31,12 @@ const tinted = new Map();
 const decoder = new TextDecoder();
 
 function fit() {
-  // Whole-number scale so the pixel art stays crisp.
-  const s = Math.max(1, Math.floor(Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H)));
+  // Fill the window (itch's full-screen embed); fractional scale beats a tiny whole-number one.
+  const s = Math.max(1, Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H));
   canvas.width = VIEW_W;
   canvas.height = VIEW_H;
-  canvas.style.width = VIEW_W * s + "px";
-  canvas.style.height = VIEW_H * s + "px";
+  canvas.style.width = Math.floor(VIEW_W * s) + "px";
+  canvas.style.height = Math.floor(VIEW_H * s) + "px";
 }
 addEventListener("resize", fit);
 fit();
