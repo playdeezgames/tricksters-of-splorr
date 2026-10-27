@@ -1,6 +1,6 @@
 # Itch.io page text
 
-The page: https://thegrumpygamedev.itch.io/tricksters-of-splorr (the slug is a guess until the page exists; check it)
+The page: https://thegrumpygamedev.itch.io/tricksters-of-splorr (live; slug confirmed October 27, 2026)
 Made for All Tools Allowed #3 (https://itch.io/jam/all-tools-allowed-3), theme TRICK.
 This file is pasted in by hand; nothing here is published by the repo.
 
@@ -31,7 +31,7 @@ There is a small surprise in the last act. Take a bow when it comes.
 
 ## Notes (not for the page)
 
-- The page does not exist yet. `tools/ship.sh` pushes to `thegrumpygamedev/tricksters-of-splorr:html`, and only with `--push`. Confirm the slug against the real page before the first push; a different channel name would create a second upload.
+- The page exists and is published. `tools/ship.sh` pushes to `thegrumpygamedev/tricksters-of-splorr:html`, and only with `--push`; the live channel is `html` (version 3 at last check), so do not rename it.
 - On the page's Edit game screen: set "Kind of project" to HTML, tick "This file will be played in the browser" on the html upload, and use the full-screen embed (the canvas scales to fill the window). Submit the page to the jam from the jam page after the upload is processed.
 - The cover is `assets/cover.png` (630 by 500, drawn by `tools/make_cover.py`); screenshots are in `assets/screenshots/` (made by `tools/make_screenshots.sh`, which drives the page's QA parameters; the end-screen shot shows a perfect run).
 - The AI-use paragraph is a draft in the user's voice. Confirm the wording, in particular "from my design decisions and playtesting", and fill in the jam's AI-tools disclosure on the submission to match. The jam requires a disclosure, or the entry is not accepted.
