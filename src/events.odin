@@ -13,6 +13,7 @@ Event :: enum {
 	Point,
 	Hat,
 	Prize,
+	No_Prize, // stood on the exit empty-handed
 	Caught,
 	Won,
 }
@@ -28,6 +29,7 @@ describe_turn :: proc(before, after: ^Game, a: Action, ok: bool) -> Event {
 	case after.points < before.points:              return .Point
 	case after.has_prize && !before.has_prize:      return .Prize
 	case after.disguise_turns > before.disguise_turns: return .Hat
+	case !after.has_prize && after.tiles[after.player.y][after.player.x] == .Exit: return .No_Prize
 	case a == .Wait:                                return .Wait
 	}
 	return .Step
@@ -75,6 +77,10 @@ NARRATION := [Event][]string {
 	.Prize = {
 		"Got it! Now stroll out like it's yours.",
 		"Ours now. Don't run. Never run.",
+	},
+	.No_Prize = {
+		"Not without the goods, darling.",
+		"The exit can wait. The prize can't.",
 	},
 	.Caught = {
 		"Spotted! Press Z, the crowd forgives.",

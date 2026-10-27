@@ -688,6 +688,9 @@ events_describe_each_kind_of_turn :: proc(t: ^testing.T) {
 	testing.expect_value(t, event_of(&g, .Move_Right), Event.Step)
 	testing.expect_value(t, event_of(&g, .Wait), Event.Wait)
 
+	game_load(&g, room(EMPTY, "#@E$............#"))
+	testing.expect_value(t, event_of(&g, .Move_Right), Event.No_Prize)
+
 	l := room(EMPTY, "#@h$E>...........#")
 	l.coins = 1
 	game_load(&g, l)

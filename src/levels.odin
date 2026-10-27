@@ -4,7 +4,7 @@ package tricksters
 levels := [?]Level {
 	{
 		name = "Opening Night",
-		intro = "Watch the guard. Walk when he looks away.",
+		intro = "Grab the ring, then go. Walk when he turns.",
 		act = 1,
 		par = 30,
 		rows = {

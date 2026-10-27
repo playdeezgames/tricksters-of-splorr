@@ -111,7 +111,7 @@ sound_for_event :: proc(e: Event) -> Sound {
 	switch e {
 	case .Step:       return .Step
 	case .Wait:       return .Wait
-	case .Bump:       return .Bump
+	case .Bump, .No_Prize: return .Bump
 	case .Coin_Toss:  return .Coin
 	case .Pickpocket: return .Pickpocket
 	case .Door_Open:  return .Door
@@ -276,11 +276,15 @@ on_key :: proc(e: js.Event) {
 		if game.coins > 0 && game.status == .Playing {
 			aiming = .Coin
 			narration = "Which way does the coin fly?"
+		} else if game.coins <= 0 && game.status == .Playing {
+			narration = "No coins left. Z rewinds to get one back."
 		}
 	case "l", "L":
 		if game.points > 0 && game.status == .Playing {
 			aiming = .Point
 			narration = "Which way do you point?"
+		} else if game.points <= 0 && game.status == .Playing {
+			narration = "No pointing left. Z rewinds to get it back."
 		}
 	}
 }
