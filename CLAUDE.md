@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Planning phase. The game is a turn-based stealth puzzle ("Con Artist": distract guards, lift the prize, reach the exit); the design, level plan, architecture and schedule are in `docs/DESIGN.md`, which is the source of truth. There is no source, build script or test yet. Update this file as the structure is decided and created. Do not invent commands: the ones below come from the bok recipe and have not been run in this repo.
+Planning phase. The game is a turn-based stealth puzzle ("Con Artist": distract guards, lift the prize, reach the exit); the design, level plan, architecture and schedule are in `design/DESIGN.md`, which is the source of truth. There is no source, build script or test yet. Update this file as the structure is decided and created. Do not invent commands: the ones below come from the bok recipe and have not been run in this repo.
 
 ## The jam
 

@@ -1,0 +1,16 @@
+Bit Bonanza v5.0 (10x10 RPG assets tileset) by VEXED (v3x3d)
+Page: https://v3x3d.itch.io/bit-bonanza
+Read and downloaded: October 10, 2026. File: Bit-Bonanza-v-5.0.zip (135,292 bytes).
+SHA-256: 3fc650a58e4013ab37b4385b428c62c57accb7460c2f689704488085c474d26f
+
+Licence: Creative Commons Zero v1.0 Universal (CC0 1.0), as stated on the page.
+  https://creativecommons.org/publicdomain/zero/1.0/
+The page says: "These assets are CC0, use them in commercial projects modify tiles as you wish."
+The author wrote in a comment: "credit is appreciated but not required."
+The page is tagged "No generative AI was used".
+No licence file is distributed in the zip (README.txt has support links only).
+
+CC0 requires no credit. The vault credits anyway:
+  Bit Bonanza by VEXED, https://v3x3d.itch.io/bit-bonanza
+
+_contact_sheet_1bit_x3.png is a vault-made preview (all 1-Bit sheets at 3x); it is not part of the pack.

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tricksters of SPLORR!!</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d0814; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { image-rendering: pixelated; outline: none; }
+</style>
+</head>
+<body>
+<canvas id="screen" tabindex="0"></canvas>
+<script type="text/javascript" src="odin.js"></script>
+<script>
+"use strict";
+const VIEW_W = 400, VIEW_H = 300;
+// Order must match the Sheet enum in src/web.odin.
+const SHEETS = [
+  "bit-bonanza/People.png", "bit-bonanza/Creatures.png", "bit-bonanza/Tools.png",
+  "bit-bonanza/UI.png", "bit-bonanza/Clothing.png", "bit-bonanza/Jewelry.png",
+  "bit-bonanza/Food.png", "bit-bonanza/Misc.png", "bountiful-bits/Civilized.png",
+];
+
+const canvas = document.getElementById("screen");
+const g = canvas.getContext("2d");
+const memory = new odin.WasmMemoryInterface();
+const images = [];
+const tinted = new Map();
+const decoder = new TextDecoder();
+
+function fit() {
+  // Fill the window (itch's full-screen embed); fractional scale beats a tiny whole-number one.
+  const s = Math.max(1, Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H));
+  canvas.width = VIEW_W;
+  canvas.height = VIEW_H;
+  canvas.style.width = Math.floor(VIEW_W * s) + "px";
+  canvas.style.height = Math.floor(VIEW_H * s) + "px";
+}
+addEventListener("resize", fit);
+fit();
+
+function hex(c) { return "#" + (c & 0xffffff).toString(16).padStart(6, "0"); }
+function css(r, gr, b, a) { return `rgba(${r * 255 | 0},${gr * 255 | 0},${b * 255 | 0},${a})`; }
+
+// White-ink sheets are tinted once per (sheet, color) and cached.
+function tintedSheet(sheet, color) {
+  const key = sheet * 0x1000000 + (color & 0xffffff);
+  let t = tinted.get(key);
+  if (!t) {
+    const img = images[sheet];
+    t = document.createElement("canvas");
+    t.width = img.width; t.height = img.height;
+    const c = t.getContext("2d");
+    c.drawImage(img, 0, 0);
+    c.globalCompositeOperation = "source-in";
+    c.fillStyle = hex(color);
+    c.fillRect(0, 0, t.width, t.height);
+    tinted.set(key, t);
+  }
+  return t;
+}
+
+const canvasImports = {
+  clear_canvas(r, gr, b) { g.fillStyle = css(r, gr, b, 1); g.fillRect(0, 0, VIEW_W, VIEW_H); },
+  fill_rect(x, y, w, h, r, gr, b, a) { g.fillStyle = css(r, gr, b, a); g.fillRect(x, y, w, h); },
+  draw_sprite(sheet, col, row, x, y, size, color) {
+    g.imageSmoothingEnabled = false;
+    g.drawImage(tintedSheet(sheet, color), col * 10, row * 10, 10, 10, x, y, size, size);
+  },
+  draw_text(ptr, len, x, y, size, color) {
+    const s = decoder.decode(new Uint8Array(memory.memory.buffer, ptr, len));
+    g.font = size + "px PublicPixel";
+    g.textBaseline = "top";
+    g.fillStyle = hex(color);
+    g.fillText(s, x, y);
+  },
+};
+
+// ---- Sound: everything is synthesised with Web Audio, so there are no audio files. ----
+let actx = null, master = null, muted = false;
+function audio() {
+  if (!actx) {
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain();
+      master.gain.value = 0.4;
+      master.connect(actx.destination);
+    } catch (e) { actx = null; }
+  }
+  if (actx && actx.state === "suspended") actx.resume().catch(() => {});
+  return actx;
+}
+// Browsers only start audio after a gesture, so any key or click unlocks it.
+addEventListener("keydown", e => {
+  if (e.key === "m" || e.key === "M") muted = !muted;
+  audio();
+});
+addEventListener("pointerdown", audio);
+
+function tone(freq, dur, o = {}) {
+  const c = audio();
+  if (!c || muted) return;
+  const t0 = c.currentTime + (o.delay || 0);
+  const osc = c.createOscillator();
+  osc.type = o.type || "square";
+  osc.frequency.setValueAtTime(freq, t0);
+  if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t0 + dur);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(o.vol ?? 0.2, t0 + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(master);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+}
+
+function noise(dur, o = {}) {
+  const c = audio();
+  if (!c || muted) return;
+  const t0 = c.currentTime + (o.delay || 0);
+  const buf = c.createBuffer(1, Math.max(1, Math.floor(c.sampleRate * dur)), c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const f = c.createBiquadFilter();
+  f.type = o.filter || "lowpass";
+  f.frequency.setValueAtTime(o.freq || 1200, t0);
+  if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t0 + dur);
+  const g = c.createGain();
+  g.gain.setValueAtTime(o.vol ?? 0.2, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(f).connect(g).connect(master);
+  src.start(t0);
+}
+
+// Order must match the Sound enum in src/web.odin.
+const SOUNDS = [
+  /* Step */       () => tone(330, 0.04, { vol: 0.07 }),
+  /* Wait */       () => tone(180, 0.06, { type: "sine", vol: 0.1 }),
+  /* Bump */       () => tone(90, 0.13, { type: "triangle", to: 55, vol: 0.3 }),
+  /* Coin */       () => { tone(1568, 0.09, { type: "sine", vol: 0.18 }); tone(2093, 0.22, { type: "sine", vol: 0.16, delay: 0.07 }); },
+  /* Pickpocket */ () => { noise(0.05, { freq: 3000, filter: "highpass", vol: 0.1 }); tone(700, 0.1, { type: "triangle", to: 950, vol: 0.18, delay: 0.03 }); },
+  /* Door */       () => { tone(130, 0.28, { type: "sawtooth", to: 60, vol: 0.14 }); tone(600, 0.04, { vol: 0.12, delay: 0.26 }); },
+  /* Point */      () => { tone(300, 0.2, { type: "sine", to: 900, vol: 0.16 }); noise(0.18, { freq: 800, to: 2400, filter: "bandpass", vol: 0.1 }); },
+  /* Hat */        () => { noise(0.16, { freq: 1500, to: 300, vol: 0.18 }); tone(520, 0.12, { type: "triangle", to: 780, vol: 0.16, delay: 0.05 }); },
+  /* Prize */      () => { [660, 880, 1320].forEach((f, i) => tone(f, 0.1, { type: "sine", vol: 0.18, delay: i * 0.07 })); },
+  /* Caught */     () => { tone(420, 0.5, { type: "sawtooth", to: 80, vol: 0.2 }); tone(110, 0.4, { vol: 0.12 }); },
+  /* Won */        () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.12, { vol: 0.16, delay: i * 0.09 })); tone(1047, 0.4, { type: "triangle", vol: 0.16, delay: 0.38 }); },
+  /* Undo */       () => tone(500, 0.1, { type: "triangle", to: 250, vol: 0.18 }),
+  /* Restart */    () => tone(300, 0.16, { type: "triangle", to: 140, vol: 0.2 }),
+  /* Select */     () => { tone(880, 0.06, { vol: 0.14 }); tone(1175, 0.1, { vol: 0.14, delay: 0.06 }); },
+  /* Curtain */    () => noise(0.55, { freq: 900, to: 250, vol: 0.2 }),
+];
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("could not load " + src));
+    img.src = "assets/" + src;
+  });
+}
+
+async function boot() {
+  const font = new FontFace("PublicPixel", "url(assets/fonts/PublicPixel.ttf)");
+  await font.load();
+  document.fonts.add(font);
+  for (const s of SHEETS) images.push(await loadImage(s));
+  canvas.focus();
+  await odin.runWasm("game.wasm", null, { canvas: canvasImports, audio: { play_sound: id => { if (SOUNDS[id]) SOUNDS[id](); } } }, memory);
+  const level = parseInt(new URLSearchParams(location.search).get("level"));
+  if (level && memory.exports.debug_level) memory.exports.debug_level(level);
+  // QA parameters, used for the store screenshots: ?level=N&screen=title|act|play|end&keys=<moves>
+  // keys uses the solver's notation: U D L R move, . wait, p pickpocket, u d l r toss a coin,
+  // ^ v < > "Look over there!", _ confirm.
+  const params = new URLSearchParams(location.search);
+  const screens = { title: 0, act: 1, play: 2, end: 3 };
+  if (params.has("screen") && memory.exports.debug_screen) memory.exports.debug_screen(screens[params.get("screen")] ?? 2);
+  const moves = {
+    U: ["ArrowUp"], D: ["ArrowDown"], L: ["ArrowLeft"], R: ["ArrowRight"], ".": [" "], _: [" "], p: ["p"],
+    u: ["t", "ArrowUp"], d: ["t", "ArrowDown"], l: ["t", "ArrowLeft"], r: ["t", "ArrowRight"],
+    "^": ["l", "ArrowUp"], v: ["l", "ArrowDown"], "<": ["l", "ArrowLeft"], ">": ["l", "ArrowRight"],
+  };
+  for (const c of params.get("keys") || "") {
+    for (const key of moves[c] || []) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+  }
+}
+boot().catch(e => { console.error(e); document.body.textContent = String(e); });
+</script>
+</body>
+</html>

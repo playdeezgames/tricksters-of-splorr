@@ -1,0 +1,16 @@
+Bountiful Bits v3.2 (10x10 RPG assets, top-down tileset) by VEXED (v3x3d)
+Page: https://v3x3d.itch.io/bountiful-bits
+Read and downloaded: October 10, 2026. File: Bountiful-Bits-v3.2.zip (153,475 bytes).
+SHA-256: 39d76f7035b8777f7f86aad0edd38d535c99d3305d37aa572b5dbd910d619cd2
+
+Licence: Creative Commons Zero v1.0 Universal (CC0 1.0), as stated on the page.
+  https://creativecommons.org/publicdomain/zero/1.0/
+The page says: "Feel free to use these in commercial projects, and to modify the tiles
+as you wish." The page is tagged "No generative AI was used".
+No licence file is distributed in the zip (README.txt only has support links).
+Provenance: inspired by Kenney's 1-bit tiles, described by the author as a reimagining with
+unique tiles; Kenney commented on the page that his assets are public domain and that
+inspiration and copying are fine.
+
+CC0 requires no credit. The vault credits anyway:
+  Bountiful Bits by VEXED, https://v3x3d.itch.io/bountiful-bits
