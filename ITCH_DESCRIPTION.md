@@ -10,6 +10,8 @@ A small stage show of sleight and nerve: toss a coin, lift a key, turn a guard's
 
 ## Paste this as the page description
 
+**Latest version:** https://playdeezgames.github.io/tricksters-of-splorr/
+
 Welcome to the show. You are a trickster, and every level is a stage with a prize on it, an exit across it, and guards who would very much like to see you.
 
 **Nobody gets hurt. Nobody even gets close.** Guards watch the three tiles in front of them, and you win by working out where their eyes are going to be. Every turn you act once, then every guard acts once, and what they do is never random: you can see their route, watch their cone, and plan.
